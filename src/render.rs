@@ -1,4 +1,6 @@
 use crate::event::TemuEvent;
+use futures_executor::{block_on, LocalPool, LocalSpawner};
+use futures_task::{LocalFutureObj, LocalSpawn};
 use wayland_client::{protocol::wl_surface, Display, EventQueue};
 use wgpu_glyph::{
     ab_glyph::{Font, FontRef},
@@ -41,7 +43,7 @@ impl ViewportDesc {
             format: render_format,
             width: width.max(300),
             height: height.max(200),
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode: wgpu::PresentMode::Mailbox,
         };
 
         self.surface.configure(device, &config);
@@ -148,14 +150,14 @@ impl WgpuContext {
         }
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) {
+    pub fn resize(&mut self, width: u32, height: u32, spawner: &LocalSpawner) {
         if self.viewport.config.width != width || self.viewport.config.height != height {
             self.viewport.resize(&self.device, width, height);
-            self.redraw();
+            self.redraw(spawner);
         }
     }
 
-    pub fn redraw(&mut self) {
+    pub fn redraw(&mut self, spawner: &LocalSpawner) {
         eprintln!("Redraw");
         let frame = self.viewport.get_current_texture();
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
@@ -180,8 +182,8 @@ impl WgpuContext {
                 depth_stencil_attachment: None,
             });
 
-            // rpass.set_pipeline(&self.render_pipeline);
-            // rpass.draw(0..3, 0..1);
+            rpass.set_pipeline(&self.render_pipeline);
+            rpass.draw(0..3, 0..1);
         }
 
         {
@@ -192,52 +194,57 @@ impl WgpuContext {
                 text: vec![Text::new("가나다").with_color(foreground)],
                 ..Default::default()
             });
-            self.viewport.glyph.draw_queued(
-                &self.device,
-                &mut self.staging_belt,
-                &mut encoder,
-                &view,
-                self.viewport.config.width,
-                self.viewport.config.height,
-            );
+            self.viewport
+                .glyph
+                .draw_queued(
+                    &self.device,
+                    &mut self.staging_belt,
+                    &mut encoder,
+                    &view,
+                    self.viewport.config.width,
+                    self.viewport.config.height,
+                )
+                .unwrap();
         }
 
         self.staging_belt.finish();
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+        spawner
+            .spawn_local_obj(LocalFutureObj::new(Box::new(self.staging_belt.recall())))
+            .unwrap();
     }
 }
 
-pub async fn run(
+pub fn run(
     handle: WindowHandle,
     mut event_queue: EventQueue,
-    event_rx: flume::Receiver<TemuEvent>,
+    event_rx: crossbeam_channel::Receiver<TemuEvent>,
 ) {
+    let mut local_pool = LocalPool::new();
+    let local_spawner = local_pool.spawner();
+
     let instance = wgpu::Instance::new(wgpu::Backends::all());
     let viewport = ViewportDesc::new(&instance, &handle);
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            compatible_surface: Some(&viewport.surface),
-            ..Default::default()
-        })
-        .await
-        .expect("Failed to find an appropriate adapter");
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        compatible_surface: Some(&viewport.surface),
+        ..Default::default()
+    }))
+    .expect("Failed to find an appropriate adapter");
 
-    let (device, queue) = adapter
-        .request_device(
-            &wgpu::DeviceDescriptor {
-                label: None,
-                features: wgpu::Features::empty(),
-                limits: wgpu::Limits::downlevel_defaults(),
-            },
-            None,
-        )
-        .await
-        .expect("Failed to create device");
+    let (device, queue) = block_on(adapter.request_device(
+        &wgpu::DeviceDescriptor {
+            label: None,
+            features: wgpu::Features::empty(),
+            limits: wgpu::Limits::downlevel_defaults(),
+        },
+        None,
+    ))
+    .expect("Failed to create device");
 
     let mut ctx = WgpuContext::new(viewport.build(300, 200, &adapter, &device), device, queue);
 
-    ctx.redraw();
+    ctx.redraw(&local_spawner);
 
     loop {
         match event_rx.try_recv() {
@@ -246,13 +253,18 @@ pub async fn run(
                     break;
                 }
                 TemuEvent::Resize { width, height } => {
-                    ctx.resize(width, height);
+                    ctx.resize(width, height, &local_spawner);
+                    local_pool.run_until_stalled();
+                }
+                TemuEvent::Redraw => {
+                    ctx.redraw(&local_spawner);
+                    local_pool.run_until_stalled();
                 }
             },
-            Err(flume::TryRecvError::Disconnected) => {
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 break;
             }
-            Err(flume::TryRecvError::Empty) => {
+            Err(crossbeam_channel::TryRecvError::Empty) => {
                 event_queue
                     .dispatch(&mut (), |_, _, _| { /* we ignore unfiltered messages */ })
                     .unwrap();

@@ -20,7 +20,7 @@ event_enum!(
 );
 
 fn main() {
-    let (event_tx, event_rx) = flume::bounded(64);
+    let (event_tx, event_rx) = crossbeam_channel::bounded(64);
 
     env_logger::init();
 
@@ -71,10 +71,11 @@ fn main() {
         _ => unreachable!(),
     });
 
+    let tx = event_tx.clone();
     let xdg_toplevel = xdg_surface.get_toplevel();
     xdg_toplevel.quick_assign(move |_, event, _| match event {
         xdg_toplevel::Event::Close => {
-            event_tx.send(TemuEvent::Close).ok();
+            tx.send(TemuEvent::Close).ok();
         }
         xdg_toplevel::Event::Configure {
             width,
@@ -88,12 +89,11 @@ fn main() {
                 })
                 .collect::<Vec<_>>();
 
-            event_tx
-                .send(TemuEvent::Resize {
-                    width: width as u32,
-                    height: height as u32,
-                })
-                .ok();
+            tx.send(TemuEvent::Resize {
+                width: width as u32,
+                height: height as u32,
+            })
+            .ok();
             println!(
                 "xdg_toplevel (Configure) width: {}, height: {}, states: {:?}",
                 width, height, states
@@ -103,6 +103,7 @@ fn main() {
     });
     xdg_toplevel.set_title("Temu".to_string());
 
+    let tx = event_tx.clone();
     // initialize a seat to retrieve pointer & keyboard events
     //
     // example of using a common filter to handle both pointer & keyboard events
@@ -127,6 +128,7 @@ fn main() {
                 // println!("Pointer moved to ({}, {}).", surface_x, surface_y);
             }
             wl_pointer::Event::Button { button, state, .. } => {
+                tx.send(TemuEvent::Redraw).ok();
                 // println!("Button {} was {:?}.", button, state);
             }
             _ => {}
@@ -139,6 +141,7 @@ fn main() {
                 // println!("Lost keyboard focus.");
             }
             wl_keyboard::Event::Key { key, state, .. } => {
+                tx.send(TemuEvent::Redraw).ok();
                 // println!("Key with id {} was {:?}.", key, state);
             }
             _ => (),
@@ -182,5 +185,5 @@ fn main() {
     // surface.attach(Some(&buffer), 0, 0);
     // surface.commit();
 
-    pollster::block_on(render::run(handle, event_queue, event_rx));
+    render::run(handle, event_queue, event_rx);
 }

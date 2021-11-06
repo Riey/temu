@@ -22,7 +22,6 @@
             libxkbcommon
             vulkan-loader
           ];
-          LD_LIBRARY_PATH = "${pkgs.libGL}/lib:${pkgs.vulkan-loader}/lib";
         };
     });
 }
