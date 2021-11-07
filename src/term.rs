@@ -101,6 +101,8 @@ pub fn run(_event_tx: Sender<TemuEvent>, shared_terminal: Arc<SharedTerminal>) {
             }
         }
     }
+
+    log::error!("pty ended");
 }
 
 fn start_pty() -> File {

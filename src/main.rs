@@ -70,7 +70,6 @@ fn main() {
     let xdg_surface = xdg_wm_base.get_xdg_surface(&surface);
     xdg_surface.quick_assign(move |xdg_surface, event, _| match event {
         xdg_surface::Event::Configure { serial } => {
-            println!("xdg_surface (Configure)");
             xdg_surface.ack_configure(serial);
         }
         _ => unreachable!(),
@@ -80,7 +79,7 @@ fn main() {
     let xdg_toplevel = xdg_surface.get_toplevel();
     xdg_toplevel.quick_assign(move |_, event, mut data| match event {
         xdg_toplevel::Event::Close => {
-            println!("Closed");
+            log::info!("Closed");
             *data.get().unwrap() = true;
             tx.send(TemuEvent::Close).ok();
         }
@@ -101,10 +100,6 @@ fn main() {
                 height: height as u32,
             })
             .ok();
-            println!(
-                "xdg_toplevel (Configure) width: {}, height: {}, states: {:?}",
-                width, height, states
-            );
         }
         _ => unreachable!(),
     });

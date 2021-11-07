@@ -1,35 +1,30 @@
-use std::{borrow::Cow, iter, sync::Arc};
+use std::iter;
 
-#[derive(Clone)]
-pub enum Cell {
-    /// Start position
-    Start(String),
-    /// It has same attributes + color + bg_color and get next char position of left cell
-    Merged,
+#[derive(Clone, Copy)]
+pub struct Cell {
+    pub ch: char,
 }
 
 #[derive(Clone)]
 pub struct Grid {
-    rows: Vec<Vec<Cell>>,
+    rows: Vec<Cell>,
     column: usize,
-    latest_start_cell: usize,
+    row: usize,
     cursor: (usize, usize),
 }
 
-fn empty_row(column: usize) -> Vec<Cell> {
-    let row_iter = iter::once(Cell::Start(" ".repeat(column).into()))
-        .chain(iter::repeat(Cell::Merged))
-        .take(column);
+fn empty_row(column: usize) -> impl Iterator<Item = Cell> {
+    let row_iter = iter::repeat(Cell { ch: ' ' }).take(column);
 
-    row_iter.collect()
+    row_iter
 }
 
 impl Grid {
     pub fn new(column: usize) -> Self {
         Self {
-            rows: vec![empty_row(column); 1],
+            rows: empty_row(column).collect(),
+            row: 1,
             column,
-            latest_start_cell: 0,
             cursor: (0, 0),
         }
     }
@@ -39,42 +34,48 @@ impl Grid {
     }
 
     pub fn rows(&self) -> impl Iterator<Item = &[Cell]> + '_ {
-        self.rows.iter().map(Vec::as_slice)
+        self.rows.chunks(self.column)
+    }
+
+    fn get_slice(&self, x: usize, y: usize) -> Option<&[Cell]> {
+        self.rows.get(y * self.column + x..)
+    }
+
+    fn get_mut_slice(&mut self, x: usize, y: usize) -> Option<&mut [Cell]> {
+        self.rows.get_mut(y * self.column + x..)
     }
 
     pub fn lf(&mut self) {
         let new_y = self.cursor.1 + 1;
 
-        if let Some(next_row) = self.rows.get(new_y as usize) {
-            self.latest_start_cell = next_row
-                .iter()
-                .position(|c| matches!(c, Cell::Merged))
-                .unwrap();
-        } else {
-            self.rows.reserve(10);
-            self.rows.push(empty_row(self.column));
-            self.latest_start_cell = 0;
+        if self.row == new_y {
+            self.rows.extend(empty_row(self.column));
+            self.row += 1;
         }
 
         self.cursor = (0, new_y);
     }
 
-    fn current_start_cell_mut(&mut self) -> &mut Cell {
-        &mut self.rows[self.cursor.1][self.latest_start_cell]
+    pub fn current_cell_mut(&mut self) -> &mut Cell {
+        self.rows
+            .get_mut(self.cursor.1 * self.column + self.cursor.0)
+            .unwrap()
     }
 
-    fn current_cell_mut(&mut self) -> &mut Cell {
-        &mut self.rows[self.cursor.1][self.cursor.0]
+    pub fn advance_cursor(&mut self) {
+        if self.cursor.0 as usize == self.column - 1 {
+            self.lf();
+        } else {
+            self.cursor.0 += 1;
+        }
     }
 }
 
 impl vte::Perform for Grid {
     fn print(&mut self, c: char) {
-        *self.current_cell_mut() = Cell::Merged;
-        match self.current_start_cell_mut() {
-            Cell::Start(s) => s.push(c),
-            Cell::Merged => unreachable!(),
-        }
+        log::trace!("Print: {}", c);
+        self.current_cell_mut().ch = c;
+        self.advance_cursor();
     }
 
     fn execute(&mut self, byte: u8) {
@@ -83,4 +84,12 @@ impl vte::Perform for Grid {
             _ => {}
         }
     }
+}
+
+#[test]
+fn grid() {
+    let mut grid = Grid::new(10);
+    assert_eq!(grid.rows().count(), grid.row);
+    grid.lf();
+    assert_eq!(grid.rows().count(), grid.row);
 }

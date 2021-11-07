@@ -980,8 +980,10 @@ dependencies = [
 name = "temu"
 version = "0.1.0"
 dependencies = [
+ "bumpalo",
  "bytemuck",
  "crossbeam-channel",
+ "crossbeam-utils",
  "env_logger",
  "futures-executor",
  "futures-task",

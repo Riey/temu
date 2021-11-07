@@ -10,7 +10,10 @@ use bytemuck::{Pod, Zeroable};
 use futures_executor::{block_on, LocalPool, LocalSpawner};
 use futures_task::{LocalFutureObj, LocalSpawn};
 use wgpu::util::DeviceExt;
-use wgpu_glyph::{ab_glyph::FontRef, GlyphBrush, GlyphBrushBuilder, Section, Text};
+use wgpu_glyph::{
+    ab_glyph::{FontRef, PxScale, ScaleFont},
+    GlyphBrush, GlyphBrushBuilder, Layout, Section, Text,
+};
 
 pub use self::viewport::{Viewport, ViewportDesc, WindowHandle};
 
@@ -49,6 +52,7 @@ pub struct WgpuContext {
     outter_pipeline: wgpu::RenderPipeline,
     scroll_state: ScrollState,
     terminal: Terminal,
+    str_buf: Vec<u8>,
 }
 
 impl WgpuContext {
@@ -191,6 +195,7 @@ impl WgpuContext {
             bind_group,
             scroll_state,
             terminal: Terminal::new(),
+            str_buf: vec![0; 1024 * 16],
         }
     }
 
@@ -241,20 +246,31 @@ impl WgpuContext {
         {
             let wgpu::Color { a, r, g, b } = self.viewport.foreground();
             let foreground = [a as f32, r as f32, g as f32, b as f32];
+            let mut y = 0.0;
 
             for row in self.terminal.grid().rows() {
+                let mut str_buf = &mut self.str_buf[..];
+                let mut texts = Vec::with_capacity(row.len());
                 for cell in row {
-                    match cell {
-                        Cell::Start(s) => {
-                            // TODO: get attributes from cell
-                            self.glyph.queue(Section {
-                                text: vec![Text::new(dbg!(s)).with_color(foreground)],
-                                ..Default::default()
-                            });
-                        }
-                        Cell::Merged => {}
-                    }
+                    let len = cell.ch.len_utf8();
+                    let (utf_8, left) = str_buf.split_at_mut(len);
+                    str_buf = left;
+
+                    texts.push(
+                        Text::new(cell.ch.encode_utf8(utf_8))
+                            .with_color(foreground)
+                            .with_scale(PxScale::from(30.0)),
+                    );
                 }
+                self.glyph.queue(Section {
+                    text: texts,
+                    screen_position: (0.0, y),
+                    bounds: ((self.viewport.width() - 10) as f32, f32::INFINITY),
+                    layout: Layout::default_single_line(),
+                    ..Default::default()
+                });
+
+                y += 30.0;
             }
 
             self.glyph
