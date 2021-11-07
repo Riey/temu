@@ -1,135 +1,165 @@
+mod viewport;
+
 use crate::event::TemuEvent;
+use bytemuck::{Pod, Zeroable};
 use futures_executor::{block_on, LocalPool, LocalSpawner};
 use futures_task::{LocalFutureObj, LocalSpawn};
-use wayland_client::{protocol::wl_surface, Display, EventQueue};
-use wgpu_glyph::{
-    ab_glyph::{Font, FontRef},
-    GlyphBrush, GlyphBrushBuilder, Section, Text,
-};
+use wayland_client::EventQueue;
+use wgpu::util::DeviceExt;
+use wgpu_glyph::{ab_glyph::FontRef, GlyphBrush, GlyphBrushBuilder, Section, Text};
+
+pub use self::viewport::{Viewport, ViewportDesc, WindowHandle};
 
 const FONT: &[u8] = include_bytes!("/nix/store/imnk1n6llkh089xgzqyqpr6yw9qz9b3z-d2codingfont-1.3.2/share/fonts/truetype/D2Coding-Ver1.3.2-20180524-all.ttc");
-const SHADER: &str = include_str!("../shaders/shader.wgsl");
+const BAR_BG_COLOR: [f32; 3] = [0.5; 3];
+const BAR_COLOR: [f32; 3] = [0.3; 3];
+// const SHADER: &str = include_str!("../shaders/shader.wgsl");
 
-pub struct ViewportDesc {
-    surface: wgpu::Surface,
-    background: wgpu::Color,
-    foreground: wgpu::Color,
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct Vertex {
+    position: [f32; 2],
+    color: [f32; 3],
 }
 
-impl ViewportDesc {
-    pub fn new(instance: &wgpu::Instance, handle: &WindowHandle) -> Self {
-        unsafe {
-            Self {
-                surface: instance.create_surface(handle),
-                background: wgpu::Color::BLACK,
-                foreground: wgpu::Color::WHITE,
-            }
-        }
-    }
-
-    pub fn build(
-        self,
-        width: u32,
-        height: u32,
-        adapter: &wgpu::Adapter,
-        device: &wgpu::Device,
-    ) -> Viewport {
-        let render_format = self
-            .surface
-            .get_preferred_format(adapter)
-            .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: render_format,
-            width: width.max(300),
-            height: height.max(200),
-            present_mode: wgpu::PresentMode::Mailbox,
-        };
-
-        self.surface.configure(device, &config);
-
-        Viewport {
-            glyph: GlyphBrushBuilder::using_font(FontRef::try_from_slice(FONT).unwrap())
-                .build(device, render_format),
-            desc: self,
-            config,
-        }
-    }
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct WindowSize {
+    size: [f32; 2],
 }
 
-pub struct Viewport {
-    desc: ViewportDesc,
-    glyph: GlyphBrush<(), FontRef<'static>>,
-    config: wgpu::SurfaceConfiguration,
-}
-
-impl Viewport {
-    fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        self.config.width = width.max(300);
-        self.config.height = height.max(200);
-        self.desc.surface.configure(device, &self.config);
-    }
-
-    fn get_current_texture(&mut self) -> wgpu::SurfaceTexture {
-        self.desc
-            .surface
-            .get_current_texture()
-            .expect("Failed to acquire next swap chain texture")
-    }
-}
-
-pub struct WindowHandle {
-    handle: raw_window_handle::unix::WaylandHandle,
-}
-
-impl WindowHandle {
-    pub fn new(surface: &wl_surface::WlSurface, display: &Display) -> Self {
-        let mut handle = raw_window_handle::unix::WaylandHandle::empty();
-        handle.surface = surface.as_ref().c_ptr().cast();
-        handle.display = display.get_display_ptr().cast();
-
-        Self { handle }
-    }
-}
-
-unsafe impl raw_window_handle::HasRawWindowHandle for WindowHandle {
-    fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
-        raw_window_handle::RawWindowHandle::Wayland(self.handle)
-    }
-}
+const SCROLLBAR_INDICES: &[u16] = &[0, 1, 2, 1, 2, 3];
 
 pub struct WgpuContext {
     viewport: Viewport,
+    glyph: GlyphBrush<(), FontRef<'static>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     staging_belt: wgpu::util::StagingBelt,
-    shader: wgpu::ShaderModule,
-    render_pipeline: wgpu::RenderPipeline,
+    vertex_buf: wgpu::Buffer,
+    index_buf: wgpu::Buffer,
+    window_size_buf: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    inner_pipeline: wgpu::RenderPipeline,
+    outter_pipeline: wgpu::RenderPipeline,
+    scroll_state: ScrollState,
 }
 
 impl WgpuContext {
     pub fn new(viewport: Viewport, device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        let mut scroll_state = ScrollState::new();
+        scroll_state.page_size = 20;
+        scroll_state.top = 10;
+        scroll_state.max = 50;
+
+        let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Scrollbar Outter Vertex Buffer"),
+            contents: bytemuck::cast_slice(
+                &scroll_state
+                    .calculate()
+                    .get_vertexes(viewport.width(), viewport.height()),
+            ),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(SCROLLBAR_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let window_size_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("size_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("shader"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(
+                std::fs::read_to_string("shaders/shader.wgsl")
+                    .unwrap()
+                    .into(),
+            ),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&window_size_bind_group_layout],
             push_constant_ranges: &[],
         });
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("text"),
+
+        // Create window size
+        let window_size = WindowSize {
+            size: [viewport.width() as _, viewport.height() as _],
+        };
+
+        let window_size_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("WindowSize Buffer"),
+            contents: bytemuck::cast_slice(&[window_size]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create bind group
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &window_size_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: window_size_buf.as_entire_binding(),
+            }],
+            label: Some("WindowSize bind_group"),
+        });
+
+        let vertex_buffers = [wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as _,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![
+                0 => Float32x2,
+                1 => Float32x3,
+            ],
+        }];
+
+        let outter_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("scrollbar_outter"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
-                buffers: &[],
+                entry_point: "rect_vs",
+                buffers: &vertex_buffers,
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
-                targets: &[viewport.config.format.into()],
+                entry_point: "rect_fs",
+                targets: &[viewport.format().into()],
+            }),
+            primitive: wgpu::PrimitiveState {
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                ..Default::default()
+            },
+        });
+
+        let inner_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("scrollbar_inner"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "rect_vs",
+                buffers: &vertex_buffers,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "rect_round_fs",
+                targets: &[viewport.format().into()],
             }),
             primitive: wgpu::PrimitiveState {
                 ..Default::default()
@@ -141,17 +171,25 @@ impl WgpuContext {
         });
 
         Self {
+            glyph: GlyphBrushBuilder::using_font(FontRef::try_from_slice(FONT).unwrap())
+                .build(&device, viewport.format()),
             viewport,
             staging_belt: wgpu::util::StagingBelt::new(1024),
             device,
             queue,
-            shader,
-            render_pipeline,
+            vertex_buf,
+            inner_pipeline,
+            outter_pipeline,
+            index_buf,
+            window_size_buf,
+            bind_group,
+            scroll_state,
         }
     }
 
     pub fn resize(&mut self, width: u32, height: u32, spawner: &LocalSpawner) {
-        if self.viewport.config.width != width || self.viewport.config.height != height {
+        if self.viewport.width() != width || self.viewport.height() != height {
+            // TODO: update scroll_state
             self.viewport.resize(&self.device, width, height);
             self.redraw(spawner);
         }
@@ -161,7 +199,6 @@ impl WgpuContext {
         eprintln!("Redraw");
         let frame = self.viewport.get_current_texture();
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(wgpu::TextureFormat::Bgra8Unorm),
             ..Default::default()
         });
 
@@ -175,34 +212,44 @@ impl WgpuContext {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.viewport.desc.background),
+                        load: wgpu::LoadOp::Clear(self.viewport.background()),
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: None,
             });
 
-            rpass.set_pipeline(&self.render_pipeline);
-            rpass.draw(0..3, 0..1);
+            rpass.set_bind_group(0, &self.bind_group, &[]);
+            rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
+            rpass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
+
+            rpass.push_debug_group("Draw outter");
+            rpass.set_pipeline(&self.outter_pipeline);
+            rpass.draw_indexed(0..6, 0, 0..2);
+            rpass.pop_debug_group();
+
+            rpass.push_debug_group("Draw inner");
+            rpass.set_pipeline(&self.inner_pipeline);
+            rpass.draw_indexed(0..6, 4, 0..2);
+            rpass.pop_debug_group();
         }
 
         {
-            let wgpu::Color { a, r, g, b } = self.viewport.desc.foreground;
+            let wgpu::Color { a, r, g, b } = self.viewport.foreground();
             let foreground = [a as f32, r as f32, g as f32, b as f32];
 
-            self.viewport.glyph.queue(Section {
+            self.glyph.queue(Section {
                 text: vec![Text::new("가나다").with_color(foreground)],
                 ..Default::default()
             });
-            self.viewport
-                .glyph
+            self.glyph
                 .draw_queued(
                     &self.device,
                     &mut self.staging_belt,
                     &mut encoder,
                     &view,
-                    self.viewport.config.width,
-                    self.viewport.config.height,
+                    self.viewport.width(),
+                    self.viewport.height(),
                 )
                 .unwrap();
         }
@@ -227,7 +274,7 @@ pub fn run(
     let instance = wgpu::Instance::new(wgpu::Backends::all());
     let viewport = ViewportDesc::new(&instance, &handle);
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        compatible_surface: Some(&viewport.surface),
+        compatible_surface: Some(viewport.surface()),
         ..Default::default()
     }))
     .expect("Failed to find an appropriate adapter");
@@ -235,7 +282,7 @@ pub fn run(
     let (device, queue) = block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
             label: None,
-            features: wgpu::Features::empty(),
+            features: wgpu::Features::POLYGON_MODE_LINE,
             limits: wgpu::Limits::downlevel_defaults(),
         },
         None,
@@ -270,5 +317,91 @@ pub fn run(
                     .unwrap();
             }
         }
+    }
+}
+
+struct ScrollState {
+    top: u32,
+    max: u32,
+    page_size: u32,
+}
+
+struct ScrollCalcResult {
+    top: f32,
+    bottom: f32,
+}
+
+impl ScrollState {
+    pub fn new() -> Self {
+        Self {
+            top: 0,
+            max: 1,
+            page_size: 1,
+        }
+    }
+
+    pub fn calculate(&self) -> ScrollCalcResult {
+        match self.max.checked_sub(self.top) {
+            None => ScrollCalcResult::FULL,
+            Some(left) => ScrollCalcResult {
+                top: self.top as f32 / self.max as f32,
+                bottom: left as f32 / self.max as f32,
+            },
+        }
+    }
+}
+
+impl ScrollCalcResult {
+    /// Can display all lines
+    const FULL: Self = ScrollCalcResult {
+        top: 0.0,
+        bottom: 1.0,
+    };
+
+    pub fn get_vertexes(&self, width: u32, height: u32) -> [Vertex; 8] {
+        let width = width as f32;
+        let height = height as f32;
+
+        let left = 1.0 - (10.0 / width);
+        let margin_left = 2.5 / width;
+        let margin_top = 2.0 / height;
+
+        let inner_top = (1.0 - margin_top * 2.0) * self.top;
+        let inner_bottom = (1.0 - margin_top * 2.0) * self.bottom;
+
+        [
+            Vertex {
+                position: [left, 1.0],
+                color: BAR_BG_COLOR,
+            },
+            Vertex {
+                position: [1.0, 1.0],
+                color: BAR_BG_COLOR,
+            },
+            Vertex {
+                position: [left, -1.0],
+                color: BAR_BG_COLOR,
+            },
+            Vertex {
+                position: [1.0, -1.0],
+                color: BAR_BG_COLOR,
+            },
+            Vertex {
+                position: [left + margin_left, inner_top],
+                color: BAR_COLOR,
+            },
+            Vertex {
+                position: [1.0 - margin_left, inner_top],
+                color: BAR_COLOR,
+            },
+            Vertex {
+                position: [left + margin_left, inner_bottom],
+                color: BAR_COLOR,
+            },
+            Vertex {
+                position: [1.0 - margin_left, inner_bottom],
+                color: BAR_COLOR,
+            },
+        ]
     }
 }

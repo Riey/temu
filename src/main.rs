@@ -1,5 +1,6 @@
 mod event;
 mod render;
+mod term;
 
 use crate::event::TemuEvent;
 use crate::render::WindowHandle;

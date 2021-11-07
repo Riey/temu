@@ -5,6 +5,8 @@ edition = "2018"
 resolver = "2"
 
 [dependencies]
+bytemuck = "1.7.2"
+cgmath = "0.18.0"
 crossbeam-channel = "0.5.1"
 env_logger = "0.9.0"
 futures-executor = "0.3.17"
