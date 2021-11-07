@@ -25,6 +25,8 @@ event_enum!(
 );
 
 fn main() {
+    let stdout_fd = crate::term::get_shell_stdout_fd();
+
     let (event_tx, event_rx) = crossbeam_channel::bounded(64);
 
     env_logger::init();
@@ -196,8 +198,12 @@ fn main() {
 
     surface.commit();
 
-    let handle = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         render::run(handle, event_rx);
+    });
+
+    std::thread::spawn(move || {
+        term::run(event_tx, stdout_fd);
     });
 
     let mut closed = false;

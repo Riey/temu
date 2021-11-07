@@ -4,7 +4,6 @@ use crate::event::TemuEvent;
 use bytemuck::{Pod, Zeroable};
 use futures_executor::{block_on, LocalPool, LocalSpawner};
 use futures_task::{LocalFutureObj, LocalSpawn};
-use wayland_client::EventQueue;
 use wgpu::util::DeviceExt;
 use wgpu_glyph::{ab_glyph::FontRef, GlyphBrush, GlyphBrushBuilder, Section, Text};
 
@@ -30,6 +29,7 @@ struct WindowSize {
 
 const SCROLLBAR_INDICES: &[u16] = &[0, 1, 2, 1, 2, 3];
 
+#[allow(unused)]
 pub struct WgpuContext {
     viewport: Viewport,
     glyph: GlyphBrush<(), FontRef<'static>>,
