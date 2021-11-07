@@ -1,6 +1,8 @@
 mod viewport;
 
-use crate::event::TemuEvent;
+use std::{sync::Arc, time::Instant};
+
+use crate::{event::TemuEvent, term::SharedTerminal};
 use bytemuck::{Pod, Zeroable};
 use futures_executor::{block_on, LocalPool, LocalSpawner};
 use futures_task::{LocalFutureObj, LocalSpawn};
@@ -196,7 +198,7 @@ impl WgpuContext {
     }
 
     pub fn redraw(&mut self, spawner: &LocalSpawner) {
-        eprintln!("Redraw");
+        let start = Instant::now();
         let frame = self.viewport.get_current_texture();
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
             ..Default::default()
@@ -260,10 +262,17 @@ impl WgpuContext {
         spawner
             .spawn_local_obj(LocalFutureObj::new(Box::new(self.staging_belt.recall())))
             .unwrap();
+
+        let elapsed = Instant::now() - start;
+        println!("Elapsed: {}ms", elapsed.as_millis());
     }
 }
 
-pub fn run(handle: WindowHandle, event_rx: crossbeam_channel::Receiver<TemuEvent>) {
+pub fn run(
+    handle: WindowHandle,
+    event_rx: crossbeam_channel::Receiver<TemuEvent>,
+    shared_terminal: Arc<SharedTerminal>,
+) {
     let mut local_pool = LocalPool::new();
     let local_spawner = local_pool.spawner();
 
@@ -278,7 +287,7 @@ pub fn run(handle: WindowHandle, event_rx: crossbeam_channel::Receiver<TemuEvent
     let (device, queue) = block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
             label: None,
-            features: wgpu::Features::POLYGON_MODE_LINE,
+            features: wgpu::Features::empty(),
             limits: wgpu::Limits::downlevel_defaults(),
         },
         None,
@@ -290,6 +299,10 @@ pub fn run(handle: WindowHandle, event_rx: crossbeam_channel::Receiver<TemuEvent
     ctx.redraw(&local_spawner);
 
     loop {
+        if let Some(terminal) = shared_terminal.take_terminal() {
+            // TODO: draw terminal
+        }
+
         match event_rx.try_recv() {
             Ok(event) => match event {
                 TemuEvent::Close => {

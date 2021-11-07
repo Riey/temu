@@ -6,12 +6,14 @@ resolver = "2"
 
 [dependencies]
 bytemuck = "1.7.2"
-cgmath = "0.18.0"
 crossbeam-channel = "0.5.1"
 env_logger = "0.9.0"
 futures-executor = "0.3.17"
 futures-task = "0.3.17"
+nix = "0.23.0"
+parking_lot = "0.11.2"
 raw-window-handle = "0.3.3"
+vte = "0.10.1"
 wayland-client = { version = "0.29.1", default-features = false, features = ["use_system_lib"] }
 wayland-egl = "0.29.1"
 wayland-protocols = { version = "0.29.1", features = ["client", "unstable_protocols"] }

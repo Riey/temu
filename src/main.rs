@@ -2,9 +2,9 @@ mod event;
 mod render;
 mod term;
 
-use crate::event::TemuEvent;
 use crate::render::WindowHandle;
-use std::convert::TryInto;
+use crate::{event::TemuEvent, term::SharedTerminal};
+use std::{convert::TryInto, sync::Arc};
 
 use wayland_client::{
     event_enum,
@@ -25,8 +25,6 @@ event_enum!(
 );
 
 fn main() {
-    let stdout_fd = crate::term::get_shell_stdout_fd();
-
     let (event_tx, event_rx) = crossbeam_channel::bounded(64);
 
     env_logger::init();
@@ -198,12 +196,15 @@ fn main() {
 
     surface.commit();
 
+    let shared = Arc::new(SharedTerminal::new());
+
+    let shared_inner = shared.clone();
     std::thread::spawn(move || {
-        render::run(handle, event_rx);
+        render::run(handle, event_rx, shared_inner);
     });
 
     std::thread::spawn(move || {
-        term::run(event_tx, stdout_fd);
+        term::run(event_tx, shared);
     });
 
     let mut closed = false;
