@@ -1,4 +1,6 @@
-use parking_lot::{Mutex, MutexGuard};
+mod grid;
+
+use parking_lot::Mutex;
 use std::{
     env,
     fs::File,
@@ -16,22 +18,24 @@ use nix::pty::{openpty, Winsize};
 
 use crate::event::TemuEvent;
 
+pub use self::grid::{Cell, Grid};
+
 pub struct SharedTerminal {
-    terminal: Mutex<Terminal>,
+    terminal: Mutex<Option<Terminal>>,
     changed: AtomicBool,
 }
 
 impl SharedTerminal {
     pub fn new() -> Self {
         Self {
-            terminal: Mutex::new(Terminal {}),
+            terminal: Mutex::new(None),
             changed: AtomicBool::new(false),
         }
     }
 
-    pub fn take_terminal(&self) -> Option<MutexGuard<'_, Terminal>> {
+    pub fn take_terminal(&self) -> Option<Terminal> {
         if self.changed.swap(false, Ordering::Acquire) {
-            Some(self.terminal.lock())
+            self.terminal.lock().take()
         } else {
             None
         }
@@ -39,7 +43,7 @@ impl SharedTerminal {
 
     pub fn try_update_terminal(&self, terminal: &Terminal) -> bool {
         if let Some(mut lock) = self.terminal.try_lock() {
-            *lock = terminal.clone();
+            *lock = Some(terminal.clone());
             self.changed.store(true, Ordering::Release);
             true
         } else {
@@ -49,17 +53,31 @@ impl SharedTerminal {
 }
 
 #[derive(Clone)]
-pub struct Terminal {}
+pub struct Terminal {
+    grid: Grid,
+}
+
+impl Terminal {
+    pub fn new() -> Self {
+        Self {
+            grid: Grid::new(80),
+        }
+    }
+
+    pub fn grid(&self) -> &Grid {
+        &self.grid
+    }
+}
 
 pub fn run(_event_tx: Sender<TemuEvent>, shared_terminal: Arc<SharedTerminal>) {
     let mut master_file = start_pty();
 
+    log::info!("pty started");
+
     let mut need_update = true;
     let mut parser = vte::Parser::new();
-    let mut terminal = Terminal {};
+    let mut terminal = Terminal::new();
     let mut buffer = [0; 65536];
-
-    eprintln!("Start term");
 
     loop {
         if need_update {
@@ -68,17 +86,17 @@ pub fn run(_event_tx: Sender<TemuEvent>, shared_terminal: Arc<SharedTerminal>) {
         match master_file.read(&mut buffer) {
             Ok(0) => break,
             Ok(len) => {
-                eprintln!("Read {} bytes from pty", len);
+                log::debug!("Read {} bytes from pty", len);
                 let bytes = &buffer[..len];
                 for b in bytes.iter() {
-                    parser.advance(&mut terminal, *b);
+                    parser.advance(&mut terminal.grid, *b);
                 }
                 // TODO: check update
                 need_update = true;
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => {
-                eprintln!("Term Err: {}", e);
+                log::error!("Term Err: {}", e);
                 break;
             }
         }
@@ -109,39 +127,4 @@ fn start_pty() -> File {
         }
         Err(_) => todo!(),
     }
-}
-
-impl vte::Perform for Terminal {
-    fn print(&mut self, c: char) {
-        print!("{}", c);
-    }
-
-    fn execute(&mut self, byte: u8) {
-        match byte {
-            10 => {}
-            _ => {}
-        }
-    }
-
-    fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {
-    }
-
-    fn put(&mut self, byte: u8) {
-        println!("put: {}", byte);
-    }
-
-    fn unhook(&mut self) {}
-
-    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
-
-    fn csi_dispatch(
-        &mut self,
-        _params: &vte::Params,
-        _intermediates: &[u8],
-        _ignore: bool,
-        _action: char,
-    ) {
-    }
-
-    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
 }

@@ -985,6 +985,7 @@ dependencies = [
  "env_logger",
  "futures-executor",
  "futures-task",
+ "log",
  "nix 0.23.0",
  "parking_lot",
  "raw-window-handle",

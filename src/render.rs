@@ -2,7 +2,10 @@ mod viewport;
 
 use std::{sync::Arc, time::Instant};
 
-use crate::{event::TemuEvent, term::SharedTerminal};
+use crate::{
+    event::TemuEvent,
+    term::{Cell, SharedTerminal, Terminal},
+};
 use bytemuck::{Pod, Zeroable};
 use futures_executor::{block_on, LocalPool, LocalSpawner};
 use futures_task::{LocalFutureObj, LocalSpawn};
@@ -45,6 +48,7 @@ pub struct WgpuContext {
     inner_pipeline: wgpu::RenderPipeline,
     outter_pipeline: wgpu::RenderPipeline,
     scroll_state: ScrollState,
+    terminal: Terminal,
 }
 
 impl WgpuContext {
@@ -186,15 +190,13 @@ impl WgpuContext {
             window_size_buf,
             bind_group,
             scroll_state,
+            terminal: Terminal::new(),
         }
     }
 
-    pub fn resize(&mut self, width: u32, height: u32, spawner: &LocalSpawner) {
-        if self.viewport.width() != width || self.viewport.height() != height {
-            // TODO: update scroll_state
-            self.viewport.resize(&self.device, width, height);
-            self.redraw(spawner);
-        }
+    pub fn resize(&mut self, width: u32, height: u32) {
+        // TODO: update scroll_state
+        self.viewport.resize(&self.device, width, height);
     }
 
     pub fn redraw(&mut self, spawner: &LocalSpawner) {
@@ -240,10 +242,21 @@ impl WgpuContext {
             let wgpu::Color { a, r, g, b } = self.viewport.foreground();
             let foreground = [a as f32, r as f32, g as f32, b as f32];
 
-            self.glyph.queue(Section {
-                text: vec![Text::new("가나다").with_color(foreground)],
-                ..Default::default()
-            });
+            for row in self.terminal.grid().rows() {
+                for cell in row {
+                    match cell {
+                        Cell::Start(s) => {
+                            // TODO: get attributes from cell
+                            self.glyph.queue(Section {
+                                text: vec![Text::new(dbg!(s)).with_color(foreground)],
+                                ..Default::default()
+                            });
+                        }
+                        Cell::Merged => {}
+                    }
+                }
+            }
+
             self.glyph
                 .draw_queued(
                     &self.device,
@@ -296,11 +309,19 @@ pub fn run(
 
     let mut ctx = WgpuContext::new(viewport.build(300, 200, &adapter, &device), device, queue);
 
-    ctx.redraw(&local_spawner);
+    let mut need_redraw = true;
+    let mut prev_resize = (300, 200);
 
     loop {
+        if need_redraw {
+            ctx.redraw(&local_spawner);
+            local_pool.run_until_stalled();
+            need_redraw = false;
+        }
+
         if let Some(terminal) = shared_terminal.take_terminal() {
-            // TODO: draw terminal
+            ctx.terminal = terminal;
+            need_redraw = true;
         }
 
         match event_rx.try_recv() {
@@ -309,12 +330,14 @@ pub fn run(
                     break;
                 }
                 TemuEvent::Resize { width, height } => {
-                    ctx.resize(width, height, &local_spawner);
-                    local_pool.run_until_stalled();
+                    if prev_resize != (width, height) {
+                        ctx.resize(width, height);
+                        need_redraw = true;
+                        prev_resize = (width, height);
+                    }
                 }
                 TemuEvent::Redraw => {
-                    ctx.redraw(&local_spawner);
-                    local_pool.run_until_stalled();
+                    need_redraw = true;
                 }
                 TemuEvent::ScrollUp => {}
                 TemuEvent::ScrollDown => {}
