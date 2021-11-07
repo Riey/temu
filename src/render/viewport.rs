@@ -90,6 +90,8 @@ pub struct WindowHandle {
     handle: raw_window_handle::unix::WaylandHandle,
 }
 
+unsafe impl Send for WindowHandle {}
+
 impl WindowHandle {
     pub fn new(surface: &wl_surface::WlSurface, display: &Display) -> Self {
         let mut handle = raw_window_handle::unix::WaylandHandle::empty();

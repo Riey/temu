@@ -263,11 +263,7 @@ impl WgpuContext {
     }
 }
 
-pub fn run(
-    handle: WindowHandle,
-    mut event_queue: EventQueue,
-    event_rx: crossbeam_channel::Receiver<TemuEvent>,
-) {
+pub fn run(handle: WindowHandle, event_rx: crossbeam_channel::Receiver<TemuEvent>) {
     let mut local_pool = LocalPool::new();
     let local_spawner = local_pool.spawner();
 
@@ -307,14 +303,14 @@ pub fn run(
                     ctx.redraw(&local_spawner);
                     local_pool.run_until_stalled();
                 }
+                TemuEvent::ScrollUp => {}
+                TemuEvent::ScrollDown => {}
             },
             Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 break;
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {
-                event_queue
-                    .dispatch(&mut (), |_, _, _| { /* we ignore unfiltered messages */ })
-                    .unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(50));
             }
         }
     }

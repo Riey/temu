@@ -8,7 +8,11 @@ use std::convert::TryInto;
 
 use wayland_client::{
     event_enum,
-    protocol::{wl_compositor, wl_keyboard, wl_pointer, wl_seat},
+    protocol::{
+        wl_compositor, wl_keyboard,
+        wl_pointer::{self, Axis},
+        wl_seat,
+    },
     Display, Filter, GlobalManager,
 };
 use wayland_protocols::xdg_shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
@@ -74,8 +78,10 @@ fn main() {
 
     let tx = event_tx.clone();
     let xdg_toplevel = xdg_surface.get_toplevel();
-    xdg_toplevel.quick_assign(move |_, event, _| match event {
+    xdg_toplevel.quick_assign(move |_, event, mut data| match event {
         xdg_toplevel::Event::Close => {
+            println!("Closed");
+            *data.get().unwrap() = true;
             tx.send(TemuEvent::Close).ok();
         }
         xdg_toplevel::Event::Configure {
@@ -132,6 +138,17 @@ fn main() {
                 tx.send(TemuEvent::Redraw).ok();
                 // println!("Button {} was {:?}.", button, state);
             }
+            wl_pointer::Event::Axis {
+                axis: Axis::VerticalScroll,
+                value,
+                ..
+            } => {
+                if value > 0. {
+                    tx.send(TemuEvent::ScrollUp).ok();
+                } else if value < 0. {
+                    tx.send(TemuEvent::ScrollDown).ok();
+                }
+            }
             _ => {}
         },
         Events::Keyboard { event, .. } => match event {
@@ -179,12 +196,21 @@ fn main() {
 
     surface.commit();
 
-    event_queue
-        .sync_roundtrip(&mut (), |_, _, _| { /* we ignore unfiltered messages */ })
-        .unwrap();
+    let handle = std::thread::spawn(move || {
+        render::run(handle, event_rx);
+    });
 
-    // surface.attach(Some(&buffer), 0, 0);
-    // surface.commit();
+    let mut closed = false;
 
-    render::run(handle, event_queue, event_rx);
+    loop {
+        event_queue
+            .sync_roundtrip(&mut closed, |_, _, _| { /* we ignore unfiltered messages */
+            })
+            .unwrap();
+        if closed {
+            break;
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
 }
