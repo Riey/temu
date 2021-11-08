@@ -106,7 +106,6 @@ pub fn run(
                 break;
             }
         }
-
     }
 
     log::error!("pty ended");
