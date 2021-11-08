@@ -17,7 +17,7 @@ use wgpu_glyph::{
 
 pub use self::viewport::{Viewport, ViewportDesc, WindowHandle};
 
-const FONT: &[u8] = include_bytes!("/nix/store/imnk1n6llkh089xgzqyqpr6yw9qz9b3z-d2codingfont-1.3.2/share/fonts/truetype/D2Coding-Ver1.3.2-20180524-all.ttc");
+const FONT: &[u8] = include_bytes!("/nix/store/lkc45rnr4dqq2ig9ahh817c31j4kxlnq-nerdfonts-2.1.0/share/fonts/truetype/NerdFonts/Hack Bold Nerd Font Complete.ttf");
 const BAR_BG_COLOR: [f32; 3] = [0.5; 3];
 const BAR_COLOR: [f32; 3] = [0.3; 3];
 // const SHADER: &str = include_str!("../shaders/shader.wgsl");
@@ -36,6 +36,7 @@ struct WindowSize {
 }
 
 const SCROLLBAR_INDICES: &[u16] = &[0, 1, 2, 1, 2, 3];
+const FONT_SIZE: u32 = 18;
 
 #[allow(unused)]
 pub struct WgpuContext {
@@ -259,7 +260,7 @@ impl WgpuContext {
                     texts.push(
                         Text::new(cell.ch.encode_utf8(utf_8))
                             .with_color(foreground)
-                            .with_scale(PxScale::from(30.0)),
+                            .with_scale(PxScale::from(FONT_SIZE as f32)),
                     );
                 }
                 self.glyph.queue(Section {
@@ -270,7 +271,7 @@ impl WgpuContext {
                     ..Default::default()
                 });
 
-                y += 30.0;
+                y += FONT_SIZE as f32;
             }
 
             self.glyph
