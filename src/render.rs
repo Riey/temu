@@ -292,18 +292,18 @@ impl WgpuContext {
             rpass.set_pipeline(&self.outter_pipeline);
 
             rpass.push_debug_group("Draw outter");
-            rpass.draw_indexed(0..6, 0, 0..2);
+            rpass.draw_indexed(0..6, 0, 0..1);
             rpass.pop_debug_group();
 
             rpass.push_debug_group("Draw inner");
             // rounded rect is not yet implemented
             // rpass.set_pipeline(&self.inner_pipeline);
-            rpass.draw_indexed(0..6, 4, 0..2);
+            rpass.draw_indexed(0..6, 4, 0..1);
             rpass.pop_debug_group();
 
             rpass.push_debug_group("Draw cursor");
             rpass.set_vertex_buffer(0, self.cursor_vertex_buf.slice(..));
-            rpass.draw_indexed(0..6, 0, 0..2);
+            rpass.draw_indexed(0..6, 0, 0..1);
             rpass.pop_debug_group();
         }
 
