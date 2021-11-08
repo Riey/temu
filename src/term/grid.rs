@@ -1,4 +1,5 @@
 use std::iter;
+use termwiz::escape::{csi::Cursor, Action, ControlCode, Esc, EscCode, CSI};
 
 #[derive(Clone, Copy)]
 pub struct Cell {
@@ -53,7 +54,11 @@ impl Grid {
             self.row += 1;
         }
 
-        self.cursor = (0, new_y);
+        self.cursor.1 = new_y;
+    }
+
+    pub fn cr(&mut self) {
+        self.cursor.0 = 0;
     }
 
     pub fn current_cell_mut(&mut self) -> &mut Cell {
@@ -69,19 +74,39 @@ impl Grid {
             self.cursor.0 += 1;
         }
     }
-}
 
-impl vte::Perform for Grid {
-    fn print(&mut self, c: char) {
-        log::trace!("Print: {}", c);
-        self.current_cell_mut().ch = c;
-        self.advance_cursor();
+    pub fn cursor_right(&mut self, n: usize) {
+        self.cursor.0 = (self.cursor.0 + n).max(self.column - 1);
     }
 
-    fn execute(&mut self, byte: u8) {
-        match byte {
-            b'\n' => self.lf(),
-            _ => {}
+    pub fn cursor_left(&mut self, n: usize) {
+        self.cursor.0 = self.cursor.0.saturating_sub(n);
+    }
+
+    pub fn text(&mut self, c: char) {
+        let cell = self.current_cell_mut();
+        cell.ch = c;
+        self.advance_cursor();
+    }
+}
+
+impl Grid {
+    pub fn perform_action(&mut self, action: Action) {
+        match action {
+            Action::Print(c) => {
+                self.text(c);
+            }
+            Action::Control(ControlCode::LineFeed) => self.lf(),
+            Action::Control(ControlCode::CarriageReturn) => self.cr(),
+            Action::CSI(CSI::Cursor(Cursor::Right(r))) => {
+                self.cursor_right(r as usize);
+            }
+            Action::CSI(CSI::Cursor(Cursor::Left(l))) => {
+                self.cursor_left(l as usize);
+            }
+            other => {
+                log::warn!("Unimplemented action {:?}", other);
+            }
         }
     }
 }

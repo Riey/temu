@@ -12,13 +12,21 @@ use std::{
         Arc,
     },
 };
+use termwiz::{
+    cell::AttributeChange,
+    color::AnsiColor,
+    escape::parser::Parser,
+    surface::{change::Change, Line, Surface},
+};
 
 use crossbeam_channel::Sender;
 use nix::pty::{openpty, Winsize};
 
-use crate::event::TemuEvent;
+use crate::{event::TemuEvent, term::grid::Grid};
 
-pub use self::grid::{Cell, Grid};
+pub use self::grid::Cell;
+
+pub type Terminal = self::grid::Grid;
 
 pub struct SharedTerminal {
     terminal: Mutex<Option<Terminal>>,
@@ -52,46 +60,29 @@ impl SharedTerminal {
     }
 }
 
-#[derive(Clone)]
-pub struct Terminal {
-    grid: Grid,
-}
-
-impl Terminal {
-    pub fn new() -> Self {
-        Self {
-            grid: Grid::new(80),
-        }
-    }
-
-    pub fn grid(&self) -> &Grid {
-        &self.grid
-    }
-}
-
 pub fn run(_event_tx: Sender<TemuEvent>, shared_terminal: Arc<SharedTerminal>) {
     let mut master_file = start_pty();
 
     log::info!("pty started");
 
-    let mut need_update = true;
-    let mut parser = vte::Parser::new();
-    let mut terminal = Terminal::new();
+    let mut need_update = false;
     let mut buffer = [0; 65536];
+    let mut block = Surface::new(80, 60);
+    let mut grid = Grid::new(100);
+    let mut parser = Parser::new();
 
     loop {
         if need_update {
-            need_update = shared_terminal.try_update_terminal(&terminal);
+            need_update = shared_terminal.try_update_terminal(&grid);
         }
         match master_file.read(&mut buffer) {
             Ok(0) => break,
             Ok(len) => {
                 log::debug!("Read {} bytes from pty", len);
                 let bytes = &buffer[..len];
-                for b in bytes.iter() {
-                    parser.advance(&mut terminal.grid, *b);
-                }
-                // TODO: check update
+                parser.parse(bytes, |action| {
+                    grid.perform_action(action);
+                });
                 need_update = true;
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -108,8 +99,8 @@ pub fn run(_event_tx: Sender<TemuEvent>, shared_terminal: Arc<SharedTerminal>) {
 fn start_pty() -> File {
     match openpty(
         Some(&Winsize {
-            ws_col: 80,
-            ws_row: 30,
+            ws_col: 100,
+            ws_row: 60,
             ws_xpixel: 1000,
             ws_ypixel: 600,
         }),

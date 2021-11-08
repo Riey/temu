@@ -4,7 +4,7 @@ use std::{sync::Arc, time::Instant};
 
 use crate::{
     event::TemuEvent,
-    term::{Cell, SharedTerminal, Terminal},
+    term::{SharedTerminal, Terminal},
 };
 use bytemuck::{Pod, Zeroable};
 use futures_executor::{block_on, LocalPool, LocalSpawner};
@@ -195,7 +195,7 @@ impl WgpuContext {
             window_size_buf,
             bind_group,
             scroll_state,
-            terminal: Terminal::new(),
+            terminal: Terminal::new(100),
             str_buf: vec![0; 1024 * 16],
         }
     }
@@ -249,7 +249,7 @@ impl WgpuContext {
             let foreground = [a as f32, r as f32, g as f32, b as f32];
             let mut y = 0.0;
 
-            for row in self.terminal.grid().rows() {
+            for row in self.terminal.rows() {
                 let mut str_buf = &mut self.str_buf[..];
                 let mut texts = Vec::with_capacity(row.len());
                 for cell in row {
