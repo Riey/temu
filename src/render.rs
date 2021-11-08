@@ -32,7 +32,7 @@ wayland_client::event_enum!(
 const FONT: &[u8] = include_bytes!("/nix/store/imnk1n6llkh089xgzqyqpr6yw9qz9b3z-d2codingfont-1.3.2/share/fonts/truetype/D2Coding-Ver1.3.2-20180524-all.ttc");
 // const SHADER: &str = include_str!("../shaders/shader.wgsl");
 
-pub struct WindowContext {
+pub struct RenderContext {
     display: Display,
     pool: AutoMemPool,
     surface: wl_surface::WlSurface,
@@ -45,7 +45,7 @@ pub struct WindowContext {
     font: PxScaleFont<FontRef<'static>>,
 }
 
-impl WindowContext {
+impl RenderContext {
     pub fn new(
         event_tx: Tx,
         event_rx: Rx,
@@ -157,7 +157,7 @@ impl WindowContext {
         surface.commit();
 
         let end = Instant::now();
-        log::debug!("Elapsed: {}ms", (end - start).as_millis());
+        log::debug!("Draw elapsed: {}ms", (end - start).as_millis());
     }
 
     pub fn run(&mut self) {
@@ -202,9 +202,11 @@ pub fn run(
     display: Display,
     surface: wl_surface::WlSurface,
 ) {
-    let mut ctx = WindowContext::new(event_tx, event_rx, shared_terminal, display, surface);
+    let mut ctx = RenderContext::new(event_tx, event_rx, shared_terminal, display, surface);
 
-    log::debug!("Window initialized");
+    log::debug!("Renderer initialized");
 
     ctx.run();
+
+    log::info!("Renderer exited");
 }
