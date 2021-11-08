@@ -2,8 +2,10 @@ mod event;
 mod render;
 mod term;
 
+use crate::event::TemuPtyEvent;
 use crate::render::WindowHandle;
 use crate::{event::TemuEvent, term::SharedTerminal};
+use kime_engine_core::{InputEngine, InputResult, KeyCode, ModifierState};
 use std::{convert::TryInto, sync::Arc};
 
 use wayland_client::{
@@ -26,6 +28,7 @@ event_enum!(
 
 fn main() {
     let (event_tx, event_rx) = crossbeam_channel::bounded(64);
+    let (pty_event_ty, pty_event_rx) = crossbeam_channel::bounded(64);
 
     env_logger::init();
 
@@ -105,6 +108,13 @@ fn main() {
     });
     xdg_toplevel.set_title("Temu".to_string());
 
+    let mut config = kime_engine_core::config_load_from_config_dir().unwrap().0;
+    // commit english
+    config.preferred_direct = false;
+
+    let mut engine = InputEngine::new(&config);
+    let mut modifier = ModifierState::empty();
+
     let tx = event_tx.clone();
     // initialize a seat to retrieve pointer & keyboard events
     //
@@ -130,7 +140,6 @@ fn main() {
                 // println!("Pointer moved to ({}, {}).", surface_x, surface_y);
             }
             wl_pointer::Event::Button { button, state, .. } => {
-                tx.send(TemuEvent::Redraw).ok();
                 // println!("Button {} was {:?}.", button, state);
             }
             wl_pointer::Event::Axis {
@@ -153,8 +162,55 @@ fn main() {
             wl_keyboard::Event::Leave { .. } => {
                 // println!("Lost keyboard focus.");
             }
+            wl_keyboard::Event::Keymap { fd, .. } => unsafe {
+                libc::close(fd);
+            },
+            wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
+                if mods_depressed & 0x1 != 0 {
+                    modifier.insert(ModifierState::SHIFT);
+                }
+                if mods_depressed & 0x4 != 0 {
+                    modifier.insert(ModifierState::CONTROL);
+                }
+                if mods_depressed & 0x8 != 0 {
+                    modifier.insert(ModifierState::ALT);
+                }
+                if mods_depressed & 0x40 != 0 {
+                    modifier.insert(ModifierState::SUPER);
+                }
+            }
             wl_keyboard::Event::Key { key, state, .. } => {
-                tx.send(TemuEvent::Redraw).ok();
+                if state == wl_keyboard::KeyState::Released {
+                    return;
+                }
+
+                let ret = engine.press_key_code((key + 8) as u16, modifier, &config);
+
+                log::debug!("ret: {:?}", ret);
+
+                // TODO: preedit, not_ready
+
+                if ret.contains(InputResult::LANGUAGE_CHANGED) {
+                    engine.update_layout_state().ok();
+                }
+
+                if ret.contains(InputResult::HAS_COMMIT) {
+                    let commit = engine.commit_str();
+                    pty_event_ty.send(TemuPtyEvent::Text(commit.into())).ok();
+                    engine.clear_commit();
+                }
+
+                let bypassed = !ret.contains(InputResult::CONSUMED);
+
+                if bypassed {
+                    match KeyCode::from_hardward_code((key as u16) + 8) {
+                        Some(KeyCode::Enter) => {
+                            pty_event_ty.send(TemuPtyEvent::Enter).ok();
+                        }
+                        _ => {}
+                    }
+                }
+
                 // println!("Key with id {} was {:?}.", key, state);
             }
             _ => (),
@@ -199,7 +255,7 @@ fn main() {
     });
 
     std::thread::spawn(move || {
-        term::run(event_tx, shared);
+        term::run(event_tx, pty_event_rx, shared);
     });
 
     let mut closed = false;

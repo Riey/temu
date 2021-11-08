@@ -21,6 +21,8 @@
             wayland.dev
             libxkbcommon
             vulkan-loader
+            freetype
+            fontconfig
           ];
         };
     });

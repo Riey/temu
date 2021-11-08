@@ -5,3 +5,8 @@ pub enum TemuEvent {
     ScrollUp,
     ScrollDown,
 }
+
+pub enum TemuPtyEvent {
+    Enter,
+    Text(String),
+}

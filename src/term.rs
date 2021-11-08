@@ -1,32 +1,26 @@
 mod grid;
 
 use parking_lot::Mutex;
+use portable_pty::{
+    native_pty_system, Child, CommandBuilder, MasterPty, PtySize, PtySystem, SlavePty,
+};
 use std::{
     env,
     fs::File,
-    io::{self, Read},
+    io::{self, Read, Write},
     os::unix::prelude::FromRawFd,
-    process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
 };
-use termwiz::{
-    cell::AttributeChange,
-    color::AnsiColor,
-    escape::parser::Parser,
-    surface::{change::Change, Line, Surface},
-};
+use termwiz::escape::parser::Parser;
 
-use crossbeam_channel::Sender;
-use nix::pty::{openpty, Winsize};
+use crossbeam_channel::{Receiver, Sender};
 
-use crate::{event::TemuEvent, term::grid::Grid};
+use crate::event::{TemuEvent, TemuPtyEvent};
 
-pub use self::grid::Cell;
-
-pub type Terminal = self::grid::Grid;
+pub use self::grid::{Cell, Terminal};
 
 pub struct SharedTerminal {
     terminal: Mutex<Option<Terminal>>,
@@ -60,22 +54,43 @@ impl SharedTerminal {
     }
 }
 
-pub fn run(_event_tx: Sender<TemuEvent>, shared_terminal: Arc<SharedTerminal>) {
-    let mut master_file = start_pty();
+pub fn run(
+    _event_tx: Sender<TemuEvent>,
+    pty_event_rx: Receiver<TemuPtyEvent>,
+    shared_terminal: Arc<SharedTerminal>,
+) {
+    let (master, _shell) = start_pty();
+
+    let mut input = master.try_clone_reader().unwrap();
+
+    let mut output = master.try_clone_writer().unwrap();
+
+    std::thread::spawn(move || {
+        for ev in pty_event_rx {
+            match ev {
+                TemuPtyEvent::Enter => {
+                    output.write_all(b"\r").unwrap();
+                }
+                TemuPtyEvent::Text(t) => {
+                    log::debug!("Write: {}", t);
+                    output.write_all(t.as_bytes()).unwrap();
+                }
+            }
+        }
+    });
 
     log::info!("pty started");
 
     let mut need_update = false;
     let mut buffer = [0; 65536];
-    let mut block = Surface::new(80, 60);
-    let mut grid = Grid::new(100);
+    let mut grid = Terminal::new(100);
     let mut parser = Parser::new();
 
     loop {
         if need_update {
             need_update = shared_terminal.try_update_terminal(&grid);
         }
-        match master_file.read(&mut buffer) {
+        match input.read(&mut buffer) {
             Ok(0) => break,
             Ok(len) => {
                 log::debug!("Read {} bytes from pty", len);
@@ -91,33 +106,27 @@ pub fn run(_event_tx: Sender<TemuEvent>, shared_terminal: Arc<SharedTerminal>) {
                 break;
             }
         }
+
     }
 
     log::error!("pty ended");
 }
 
-fn start_pty() -> File {
-    match openpty(
-        Some(&Winsize {
-            ws_col: 100,
-            ws_row: 60,
-            ws_xpixel: 1000,
-            ws_ypixel: 600,
-        }),
-        None,
-    ) {
-        Ok(ret) => {
-            let master = unsafe { File::from_raw_fd(ret.master) };
-            let shell = env::var("SHELL").unwrap();
-            let mut cmd = Command::new(shell);
-            unsafe {
-                cmd.stdin(Stdio::from_raw_fd(ret.slave));
-                cmd.stderr(Stdio::from_raw_fd(ret.slave));
-                cmd.stdout(Stdio::from_raw_fd(ret.slave));
-            }
-            cmd.spawn().unwrap();
-            master
-        }
-        Err(_) => todo!(),
-    }
+fn start_pty() -> (Box<dyn MasterPty + Send>, Box<dyn Child + Send + Sync>) {
+    let pty = native_pty_system();
+
+    let mut pair = pty
+        .openpty(PtySize {
+            cols: 100,
+            rows: 60,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+
+    let shell = env::var("SHELL").unwrap();
+    let cmd = CommandBuilder::new(shell);
+    let child = pair.slave.spawn_command(cmd).unwrap();
+
+    (pair.master, child)
 }

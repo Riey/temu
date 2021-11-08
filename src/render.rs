@@ -11,7 +11,7 @@ use futures_executor::{block_on, LocalPool, LocalSpawner};
 use futures_task::{LocalFutureObj, LocalSpawn};
 use wgpu::util::DeviceExt;
 use wgpu_glyph::{
-    ab_glyph::{FontRef, PxScale, ScaleFont},
+    ab_glyph::{Font, FontRef, PxScale, ScaleFont},
     GlyphBrush, GlyphBrushBuilder, Layout, Section, Text,
 };
 
@@ -46,7 +46,8 @@ pub struct WgpuContext {
     queue: wgpu::Queue,
     staging_belt: wgpu::util::StagingBelt,
     vertex_buf: wgpu::Buffer,
-    index_buf: wgpu::Buffer,
+    rect_index_buf: wgpu::Buffer,
+    cursor_vertex_buf: wgpu::Buffer,
     window_size_buf: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     inner_pipeline: wgpu::RenderPipeline,
@@ -54,6 +55,8 @@ pub struct WgpuContext {
     scroll_state: ScrollState,
     terminal: Terminal,
     str_buf: Vec<u8>,
+    font_width: u32,
+    cursor_vertex_outdated: bool,
 }
 
 impl WgpuContext {
@@ -62,21 +65,6 @@ impl WgpuContext {
         scroll_state.page_size = 20;
         scroll_state.top = 10;
         scroll_state.max = 50;
-
-        let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Scrollbar Outter Vertex Buffer"),
-            contents: bytemuck::cast_slice(
-                &scroll_state
-                    .calculate()
-                    .get_vertexes(viewport.width(), viewport.height()),
-            ),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(SCROLLBAR_INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
 
         let window_size_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -181,6 +169,42 @@ impl WgpuContext {
             },
         });
 
+        let font = FontRef::try_from_slice(FONT).unwrap();
+        let m_glyph = font.glyph_id('M');
+        let font_width = font
+            .glyph_bounds(&m_glyph.with_scale(PxScale::from(FONT_SIZE as f32)))
+            .width() as u32;
+
+        let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Scrollbar Outter Vertex Buffer"),
+            contents: bytemuck::cast_slice(
+                &scroll_state
+                    .calculate()
+                    .get_vertexes(viewport.width(), viewport.height()),
+            ),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let cursor_vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Cursor Vertex Buffer"),
+            contents: bytemuck::cast_slice(&get_cursor_vertexes(
+                viewport.width(),
+                viewport.height(),
+                300,
+                0,
+                font_width,
+                FONT_SIZE,
+                [1.0; 3],
+            )),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(SCROLLBAR_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
         Self {
             glyph: GlyphBrushBuilder::using_font(FontRef::try_from_slice(FONT).unwrap())
                 .build(&device, viewport.format()),
@@ -189,24 +213,57 @@ impl WgpuContext {
             device,
             queue,
             vertex_buf,
+            cursor_vertex_buf,
             inner_pipeline,
             outter_pipeline,
-            index_buf,
+            rect_index_buf: index_buf,
             window_size_buf,
             bind_group,
             scroll_state,
             terminal: Terminal::new(100),
+            font_width,
             str_buf: vec![0; 1024 * 16],
+            cursor_vertex_outdated: false,
         }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
+        log::info!("Resize({}, {})", width, height);
         // TODO: update scroll_state
         self.viewport.resize(&self.device, width, height);
+        self.queue.write_buffer(
+            &self.vertex_buf,
+            0,
+            bytemuck::cast_slice(&self.scroll_state.calculate().get_vertexes(width, height)),
+        );
     }
 
     pub fn redraw(&mut self, spawner: &LocalSpawner) {
         let start = Instant::now();
+
+        if self.cursor_vertex_outdated {
+            let cursor_x = self.terminal.cursor().0 as u32 * self.font_width;
+            let cursor_y = self.terminal.cursor().1 as u32 * FONT_SIZE;
+
+            dbg!(cursor_x, cursor_y);
+
+            self.queue.write_buffer(
+                &self.cursor_vertex_buf,
+                0,
+                bytemuck::cast_slice(&get_cursor_vertexes(
+                    self.viewport.width(),
+                    self.viewport.height(),
+                    cursor_x,
+                    cursor_y,
+                    self.font_width,
+                    FONT_SIZE,
+                    [1.0; 3],
+                )),
+            );
+
+            self.cursor_vertex_outdated = false;
+        }
+
         let frame = self.viewport.get_current_texture();
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
             ..Default::default()
@@ -231,16 +288,22 @@ impl WgpuContext {
 
             rpass.set_bind_group(0, &self.bind_group, &[]);
             rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-            rpass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
+            rpass.set_index_buffer(self.rect_index_buf.slice(..), wgpu::IndexFormat::Uint16);
+            rpass.set_pipeline(&self.outter_pipeline);
 
             rpass.push_debug_group("Draw outter");
-            rpass.set_pipeline(&self.outter_pipeline);
             rpass.draw_indexed(0..6, 0, 0..2);
             rpass.pop_debug_group();
 
             rpass.push_debug_group("Draw inner");
-            rpass.set_pipeline(&self.inner_pipeline);
+            // rounded rect is not yet implemented
+            // rpass.set_pipeline(&self.inner_pipeline);
             rpass.draw_indexed(0..6, 4, 0..2);
+            rpass.pop_debug_group();
+
+            rpass.push_debug_group("Draw cursor");
+            rpass.set_vertex_buffer(0, self.cursor_vertex_buf.slice(..));
+            rpass.draw_indexed(0..6, 0, 0..2);
             rpass.pop_debug_group();
         }
 
@@ -338,6 +401,7 @@ pub fn run(
 
         if let Some(terminal) = shared_terminal.take_terminal() {
             ctx.terminal = terminal;
+            ctx.cursor_vertex_outdated = true;
             need_redraw = true;
         }
 
@@ -400,6 +464,44 @@ impl ScrollState {
     }
 }
 
+fn get_cursor_vertexes(
+    width: u32,
+    height: u32,
+    cursor_x: u32,
+    cursor_y: u32,
+    font_width: u32,
+    font_height: u32,
+    color: [f32; 3],
+) -> [Vertex; 4] {
+    let width = width as f32;
+    let height = height as f32;
+
+    let x = cursor_x as f32 / width;
+    let y = cursor_y as f32 / width;
+
+    let width = font_width as f32 / width;
+    let height = font_height as f32 / height;
+
+    [
+        Vertex {
+            position: [x, y],
+            color,
+        },
+        Vertex {
+            position: [x + width, y],
+            color,
+        },
+        Vertex {
+            position: [x, y + height],
+            color,
+        },
+        Vertex {
+            position: [x + width, y + height],
+            color,
+        },
+    ]
+}
+
 impl ScrollCalcResult {
     /// Can display all lines
     const FULL: Self = ScrollCalcResult {
@@ -411,7 +513,7 @@ impl ScrollCalcResult {
         let width = width as f32;
         let height = height as f32;
 
-        let left = 1.0 - (10.0 / width);
+        let left = 1.0 - (30.0 / width);
         let margin_left = 2.5 / width;
         let margin_top = 2.0 / height;
 
