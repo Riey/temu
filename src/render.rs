@@ -43,6 +43,8 @@ pub struct RenderContext {
     event_tx: Tx,
     shared_terminal: Arc<SharedTerminal>,
     font: PxScaleFont<FontRef<'static>>,
+    font_width: u32,
+    font_height: u32,
 }
 
 impl RenderContext {
@@ -74,7 +76,13 @@ impl RenderContext {
 
         display.flush().unwrap();
 
-        let font = FontRef::try_from_slice(FONT).unwrap();
+        const FONT_HEIGHT: u32 = 20;
+
+        let font = FontRef::try_from_slice(FONT)
+            .unwrap()
+            .into_scaled(PxScale::from(FONT_HEIGHT as f32));
+        let m_glyph = font.scaled_glyph('M');
+        let m_bound = font.outline_glyph(m_glyph).unwrap();
 
         Self {
             display,
@@ -86,7 +94,9 @@ impl RenderContext {
             event_rx,
             event_tx,
             shared_terminal,
-            font: font.into_scaled(PxScale::from(100.0)),
+            font,
+            font_width: m_bound.px_bounds().width().round() as u32,
+            font_height: FONT_HEIGHT,
         }
     }
 
@@ -120,24 +130,34 @@ impl RenderContext {
         let canvas: &mut [u32] = bytemuck::cast_slice_mut(canvas);
         canvas.fill(0xFF_00_00_00_u32);
 
-        let text = "가나다";
-
-        let mut base_x = 0;
-        for ch in text.chars() {
-            let glyph = self.font.scaled_glyph(ch);
-            let outline = self.font.outline_glyph(glyph).unwrap();
-            {
-                let base_x = base_x + outline.px_bounds().min.x as u32;
-                outline.draw(|x, y, p| {
-                    if p < 0.0002 {
-                        return;
+        let mut base_y = 0;
+        for row in self.terminal.grid().rows() {
+            let mut base_x = 0;
+            for cell in row {
+                let glyph = self.font.scaled_glyph(cell.ch);
+                match self.font.outline_glyph(glyph) {
+                    Some(outline) => {
+                        {
+                            let base_x = base_x + outline.px_bounds().min.x as u32;
+                            let base_y = base_y + dbg!(outline.px_bounds()).min.y as u32;
+                            outline.draw(|x, y, p| {
+                                if p < 0.0002 {
+                                    return;
+                                }
+                                let alpha = (p * 255.0) as u8;
+                                canvas[((base_y + y) * width + x + base_x) as usize] =
+                                    u32::from_be_bytes([255, alpha, alpha, alpha]);
+                            });
+                        }
+                        base_x += self.font_width;
                     }
-                    let alpha = (p * 255.0) as u8;
-                    canvas[(y * width + x + base_x) as usize] =
-                        u32::from_be_bytes([255, alpha, alpha, alpha]);
-                });
+                    None => {
+                        // EMPTY or bitmap
+                        base_x += self.font_width;
+                    }
+                }
             }
-            base_x += outline.px_bounds().max.x as u32;
+            base_y += self.font_height;
         }
 
         surface.attach(Some(&buffer), 0, 0);
