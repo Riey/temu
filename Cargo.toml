@@ -5,23 +5,20 @@ edition = "2018"
 resolver = "2"
 
 [dependencies]
-bumpalo = "3.8.0"
+ab_glyph = "0.2.11"
 bytemuck = "1.7.2"
 crossbeam-channel = "0.5.1"
 crossbeam-utils = "0.8.5"
 env_logger = "0.9.0"
-futures-executor = "0.3.17"
-futures-task = "0.3.17"
+glyph_brush_draw_cache = "0.1.4"
+image = "0.23.14"
 log = "0.4.14"
 nix = "0.23.0"
 parking_lot = "0.11.2"
-raw-window-handle = "0.3.3"
+smithay-client-toolkit = { version = "0.15.2", default-features = false }
 vte = "0.10.1"
-wayland-client = { version = "0.29.1", default-features = false, features = ["use_system_lib"] }
-wayland-egl = "0.29.1"
+wayland-client = { version = "0.29.1", default-features = false, features = [] }
 wayland-protocols = { version = "0.29.1", features = ["client", "unstable_protocols"] }
-wgpu = "0.11.0"
-wgpu_glyph = "0.15.1"
 
 [features]
 

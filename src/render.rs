@@ -1,455 +1,362 @@
-mod viewport;
+mod scroll;
+// mod shm;
 
-use std::{sync::Arc, time::Instant};
+use ab_glyph::{Font, FontRef, PxScale, PxScaleFont, ScaleFont};
+use crossbeam_channel::TryRecvError;
+use glyph_brush_draw_cache::DrawCache;
+use image::Rgba;
+use smithay_client_toolkit as sctk;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use sctk::{
+    environment::Environment,
+    shm::{AutoMemPool, Format},
+};
+use sctk::{
+    seat::SeatListener,
+    window::{Event as WEvent, FallbackFrame, Window},
+};
+
+sctk::default_environment!(TemuEnv, desktop);
 
 use crate::{
-    event::TemuEvent,
+    event::{Rx, TemuEvent, Tx},
     term::{Cell, SharedTerminal, Terminal},
 };
-use bytemuck::{Pod, Zeroable};
-use futures_executor::{block_on, LocalPool, LocalSpawner};
-use futures_task::{LocalFutureObj, LocalSpawn};
-use wgpu::util::DeviceExt;
-use wgpu_glyph::{
-    ab_glyph::{FontRef, PxScale, ScaleFont},
-    GlyphBrush, GlyphBrushBuilder, Layout, Section, Text,
+use wayland_client::{
+    protocol::{
+        wl_keyboard,
+        wl_pointer::{self, Axis},
+    },
+    Display, EventQueue, Filter,
 };
 
-pub use self::viewport::{Viewport, ViewportDesc, WindowHandle};
+wayland_client::event_enum!(
+    InputEvents |
+    Pointer => wl_pointer::WlPointer,
+    Keyboard => wl_keyboard::WlKeyboard
+);
 
 const FONT: &[u8] = include_bytes!("/nix/store/imnk1n6llkh089xgzqyqpr6yw9qz9b3z-d2codingfont-1.3.2/share/fonts/truetype/D2Coding-Ver1.3.2-20180524-all.ttc");
-const BAR_BG_COLOR: [f32; 3] = [0.5; 3];
-const BAR_COLOR: [f32; 3] = [0.3; 3];
 // const SHADER: &str = include_str!("../shaders/shader.wgsl");
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-struct Vertex {
-    position: [f32; 2],
-    color: [f32; 3],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-struct WindowSize {
-    size: [f32; 2],
-}
-
-const SCROLLBAR_INDICES: &[u16] = &[0, 1, 2, 1, 2, 3];
-
-#[allow(unused)]
-pub struct WgpuContext {
-    viewport: Viewport,
-    glyph: GlyphBrush<(), FontRef<'static>>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    staging_belt: wgpu::util::StagingBelt,
-    vertex_buf: wgpu::Buffer,
-    index_buf: wgpu::Buffer,
-    window_size_buf: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
-    inner_pipeline: wgpu::RenderPipeline,
-    outter_pipeline: wgpu::RenderPipeline,
-    scroll_state: ScrollState,
+pub struct WindowContext {
+    env: Environment<TemuEnv>,
+    window: Window<FallbackFrame>,
+    queue: EventQueue,
+    display: Display,
+    pool: AutoMemPool,
+    need_redraw: bool,
+    prev_resize: (u32, u32),
     terminal: Terminal,
-    str_buf: Vec<u8>,
+    event_rx: Rx,
+    event_tx: Tx,
+    shared_terminal: Arc<SharedTerminal>,
+    glyph_cache: DrawCache,
+    font: PxScaleFont<FontRef<'static>>,
+    _seat_listener: SeatListener,
 }
 
-impl WgpuContext {
-    pub fn new(viewport: Viewport, device: wgpu::Device, queue: wgpu::Queue) -> Self {
-        let mut scroll_state = ScrollState::new();
-        scroll_state.page_size = 20;
-        scroll_state.top = 10;
-        scroll_state.max = 50;
-
-        let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Scrollbar Outter Vertex Buffer"),
-            contents: bytemuck::cast_slice(
-                &scroll_state
-                    .calculate()
-                    .get_vertexes(viewport.width(), viewport.height()),
-            ),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(SCROLLBAR_INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        let window_size_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("size_bind_group_layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+impl WindowContext {
+    pub fn new(event_tx: Tx, event_rx: Rx, shared_terminal: Arc<SharedTerminal>) -> Self {
+        let (env, display, mut queue) = sctk::new_default_environment!(TemuEnv, desktop).unwrap();
+        let surface = env
+            .create_surface_with_scale_callback(move |dpi, _surface, mut data| {
+                if let Some(tx) = data.get::<Tx>() {
+                    tx.send(TemuEvent::DpiChange { dpi }).ok();
+                }
+            })
+            .detach();
+        let mut window = env
+            .create_window::<FallbackFrame, _>(surface, None, (300, 200), move |e, mut data| {
+                let e = match e {
+                    WEvent::Close => TemuEvent::Close,
+                    WEvent::Configure {
+                        new_size,
+                        states: _,
+                    } => match new_size {
+                        Some((width, height)) => TemuEvent::Resize { width, height },
+                        None => return,
                     },
-                    count: None,
-                }],
-            });
+                    WEvent::Refresh => TemuEvent::Redraw,
+                };
 
-        let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-            label: Some("shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                std::fs::read_to_string("shaders/shader.wgsl")
-                    .unwrap()
-                    .into(),
-            ),
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&window_size_bind_group_layout],
-            push_constant_ranges: &[],
-        });
+                if let Some(tx) = data.get::<Tx>() {
+                    tx.send(e).ok();
+                }
+            })
+            .unwrap();
 
-        // Create window size
-        let window_size = WindowSize {
-            size: [viewport.width() as _, viewport.height() as _],
-        };
+        window.set_title("Temu".into());
 
-        let window_size_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("WindowSize Buffer"),
-            contents: bytemuck::cast_slice(&[window_size]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let pool = env.create_auto_pool().unwrap();
+        let loop_tx = event_tx.clone();
 
-        // Create bind group
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &window_size_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: window_size_buf.as_entire_binding(),
-            }],
-            label: Some("WindowSize bind_group"),
-        });
-
-        let vertex_buffers = [wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as _,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![
-                0 => Float32x2,
-                1 => Float32x3,
-            ],
-        }];
-
-        let outter_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scrollbar_outter"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "rect_vs",
-                buffers: &vertex_buffers,
+        #[allow(unused_variables)]
+        let common_filter = Filter::new(move |event, _, _| match event {
+            InputEvents::Pointer { event, .. } => match event {
+                wl_pointer::Event::Enter {
+                    surface_x,
+                    surface_y,
+                    ..
+                } => {
+                    // println!("Pointer entered at ({}, {}).", surface_x, surface_y);
+                }
+                wl_pointer::Event::Leave { .. } => {
+                    // println!("Pointer left.");
+                }
+                wl_pointer::Event::Motion {
+                    surface_x,
+                    surface_y,
+                    ..
+                } => {
+                    // println!("Pointer moved to ({}, {}).", surface_x, surface_y);
+                }
+                wl_pointer::Event::Button { button, state, .. } => {
+                    loop_tx.send(TemuEvent::Redraw).ok();
+                    // println!("Button {} was {:?}.", button, state);
+                }
+                wl_pointer::Event::Axis {
+                    axis: Axis::VerticalScroll,
+                    value,
+                    ..
+                } => {
+                    if value > 0. {
+                        loop_tx.send(TemuEvent::ScrollUp).ok();
+                    } else if value < 0. {
+                        loop_tx.send(TemuEvent::ScrollDown).ok();
+                    }
+                }
+                _ => {}
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "rect_fs",
-                targets: &[viewport.format().into()],
-            }),
-            primitive: wgpu::PrimitiveState {
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                ..Default::default()
+            InputEvents::Keyboard { event, .. } => match event {
+                wl_keyboard::Event::Enter { .. } => {
+                    // println!("Gained keyboard focus.");
+                }
+                wl_keyboard::Event::Leave { .. } => {
+                    // println!("Lost keyboard focus.");
+                }
+                wl_keyboard::Event::Key { key, state, .. } => {
+                    loop_tx.send(TemuEvent::Redraw).ok();
+                    // println!("Key with id {} was {:?}.", key, state);
+                }
+                _ => (),
             },
         });
+        // to be handled properly this should be more dynamic, as more
+        // than one seat can exist (and they can be created and destroyed
+        // dynamically), however most "traditional" setups have a single
+        // seat, so we'll keep it simple here
+        let mut pointer_created = false;
+        let mut keyboard_created = false;
 
-        let inner_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scrollbar_inner"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "rect_vs",
-                buffers: &vertex_buffers,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "rect_round_fs",
-                targets: &[viewport.format().into()],
-            }),
-            primitive: wgpu::PrimitiveState {
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                ..Default::default()
-            },
+        let mut seats = HashMap::new();
+
+        for seat in env.get_all_seats().into_iter() {
+            if let Some((has_input, name)) = sctk::seat::with_seat_data(&seat, |seat_data| {
+                (
+                    (seat_data.has_keyboard && seat_data.has_pointer && !seat_data.defunct),
+                    seat_data.name.clone(),
+                )
+            }) {
+                if has_input {
+                    let (kbd, pointer) = (seat.get_keyboard(), seat.get_pointer());
+                    kbd.assign(common_filter.clone());
+                    pointer.assign(common_filter.clone());
+                    seats.insert(name, (kbd, pointer));
+                }
+            }
+        }
+
+        let seat_listener = env.listen_for_seats(move |seat, seat_data, _| {
+            let has_input = seat_data.has_keyboard && seat_data.has_pointer && !seat_data.defunct;
+
+            let mut entry = seats.entry(seat_data.name.clone());
+
+            if has_input {
+                entry.or_insert_with(|| {
+                    let (kbd, pointer) = (seat.get_keyboard(), seat.get_pointer());
+                    kbd.assign(common_filter.clone());
+                    pointer.assign(common_filter.clone());
+                    (kbd, pointer)
+                });
+            } else {
+                entry.and_modify(|(kdb, pointer)| {
+                    kdb.release();
+                    pointer.release();
+                });
+                seats.remove(&seat_data.name);
+            }
         });
+
+        window.resize(300, 200);
+        display.flush().unwrap();
+
+        let font = FontRef::try_from_slice(FONT).unwrap();
 
         Self {
-            glyph: GlyphBrushBuilder::using_font(FontRef::try_from_slice(FONT).unwrap())
-                .build(&device, viewport.format()),
-            viewport,
-            staging_belt: wgpu::util::StagingBelt::new(1024),
-            device,
+            display,
+            pool,
+            env,
             queue,
-            vertex_buf,
-            inner_pipeline,
-            outter_pipeline,
-            index_buf,
-            window_size_buf,
-            bind_group,
-            scroll_state,
+            window,
+            prev_resize: (300, 200),
             terminal: Terminal::new(),
-            str_buf: vec![0; 1024 * 16],
+            need_redraw: true,
+            event_rx,
+            event_tx,
+            shared_terminal,
+            glyph_cache: DrawCache::builder().dimensions(300, 200).build(),
+            font: font.into_scaled(PxScale::from(100.0)),
+            _seat_listener: seat_listener,
         }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-        // TODO: update scroll_state
-        self.viewport.resize(&self.device, width, height);
+        if self.prev_resize.0 != width || self.prev_resize.1 != height {
+            log::info!("Resize {}, {}", width, height);
+            if width > self.glyph_cache.dimensions().0 || height > self.glyph_cache.dimensions().1 {
+                self.glyph_cache = self
+                    .glyph_cache
+                    .to_builder()
+                    .dimensions(width, height)
+                    .build();
+            }
+            self.window.resize(width, height);
+            self.window.refresh();
+            self.need_redraw = true;
+            self.prev_resize = (width, height);
+        }
     }
 
-    pub fn redraw(&mut self, spawner: &LocalSpawner) {
+    pub fn redraw(&mut self) {
         let start = Instant::now();
-        let frame = self.viewport.get_current_texture();
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
-            ..Default::default()
-        });
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("background"),
-                color_attachments: &[wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.viewport.background()),
-                        store: true,
-                    },
-                }],
-                depth_stencil_attachment: None,
-            });
+        self.need_redraw = false;
 
-            rpass.set_bind_group(0, &self.bind_group, &[]);
-            rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-            rpass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
+        let surface = self.window.surface();
 
-            rpass.push_debug_group("Draw outter");
-            rpass.set_pipeline(&self.outter_pipeline);
-            rpass.draw_indexed(0..6, 0, 0..2);
-            rpass.pop_debug_group();
-
-            rpass.push_debug_group("Draw inner");
-            rpass.set_pipeline(&self.inner_pipeline);
-            rpass.draw_indexed(0..6, 4, 0..2);
-            rpass.pop_debug_group();
-        }
-
-        {
-            let wgpu::Color { a, r, g, b } = self.viewport.foreground();
-            let foreground = [a as f32, r as f32, g as f32, b as f32];
-            let mut y = 0.0;
-
-            for row in self.terminal.grid().rows() {
-                let mut str_buf = &mut self.str_buf[..];
-                let mut texts = Vec::with_capacity(row.len());
-                for cell in row {
-                    let len = cell.ch.len_utf8();
-                    let (utf_8, left) = str_buf.split_at_mut(len);
-                    str_buf = left;
-
-                    texts.push(
-                        Text::new(cell.ch.encode_utf8(utf_8))
-                            .with_color(foreground)
-                            .with_scale(PxScale::from(30.0)),
-                    );
-                }
-                self.glyph.queue(Section {
-                    text: texts,
-                    screen_position: (0.0, y),
-                    bounds: ((self.viewport.width() - 10) as f32, f32::INFINITY),
-                    layout: Layout::default_single_line(),
-                    ..Default::default()
-                });
-
-                y += 30.0;
-            }
-
-            self.glyph
-                .draw_queued(
-                    &self.device,
-                    &mut self.staging_belt,
-                    &mut encoder,
-                    &view,
-                    self.viewport.width(),
-                    self.viewport.height(),
-                )
-                .unwrap();
-        }
-
-        self.staging_belt.finish();
-        self.queue.submit(Some(encoder.finish()));
-        frame.present();
-        spawner
-            .spawn_local_obj(LocalFutureObj::new(Box::new(self.staging_belt.recall())))
+        let (width, height) = self.prev_resize;
+        let (canvas, buffer) = self
+            .pool
+            .buffer(
+                width as i32,
+                height as i32,
+                4 * width as i32,
+                Format::Argb8888,
+            )
             .unwrap();
 
-        let elapsed = Instant::now() - start;
-        println!("Elapsed: {}ms", elapsed.as_millis());
+        // Fill with Black
+        let canvas: &mut [u32] = bytemuck::cast_slice_mut(canvas);
+        canvas.fill(0xFF_00_00_00_u32);
+
+        let text = "가나다";
+
+        let mut base_x = 0;
+        for ch in text.chars() {
+            let glyph = self.font.scaled_glyph(ch);
+            let outline = self.font.outline_glyph(glyph).unwrap();
+            {
+                let base_x = base_x + outline.px_bounds().min.x as u32;
+                outline.draw(|x, y, p| {
+                    if p < 0.0002 {
+                        return;
+                    }
+                    let alpha = (p * 255.0) as u8;
+                    canvas[(y * width + x + base_x) as usize] =
+                        u32::from_be_bytes([255, alpha, alpha, alpha]);
+                });
+            }
+            base_x += outline.px_bounds().max.x as u32;
+        }
+
+        surface.attach(Some(&buffer), 0, 0);
+        // damage the surface so that the compositor knows it needs to redraw it
+        if surface.as_ref().version() >= 4 {
+            // If our server is recent enough and supports at least version 4 of the
+            // wl_surface interface, we can specify the damage in buffer coordinates.
+            // This is obviously the best and do that if possible.
+            surface.damage_buffer(0, 0, width as i32, height as i32);
+        } else {
+            // Otherwise, we fallback to compatilibity mode. Here we specify damage
+            // in surface coordinates, which would have been different if we had drawn
+            // our buffer at HiDPI resolution. We didn't though, so it is ok.
+            // Using `damage_buffer` in general is better though.
+            surface.damage(0, 0, width as i32, height as i32);
+        }
+        surface.commit();
+
+        let end = Instant::now();
+        log::debug!("Elapsed: {}ms", (end - start).as_millis());
+    }
+
+    pub fn event_loop(&mut self) {
+        log::debug!("Start event loop");
+
+        if !self.env.get_shell().unwrap().needs_configure() {
+            // initial draw to bootstrap on wl_shell
+            self.redraw();
+            self.window.refresh();
+        }
+
+        loop {
+            let mut processed = self
+                .queue
+                .dispatch(&mut self.event_tx, |_, _, _| ())
+                .unwrap();
+
+            loop {
+                match self.event_rx.try_recv() {
+                    Ok(e) => {
+                        processed += 1;
+
+                        match e {
+                            TemuEvent::Close => return,
+                            TemuEvent::Redraw => self.need_redraw = true,
+                            TemuEvent::Resize { width, height } => self.resize(width, height),
+                            // TODO
+                            TemuEvent::DpiChange { dpi } => {}
+                            TemuEvent::ScrollUp | TemuEvent::ScrollDown => {}
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        return;
+                    }
+                }
+            }
+
+            if let Some(terminal) = self.shared_terminal.take_terminal() {
+                self.terminal = terminal;
+                self.need_redraw = true;
+                processed += 1;
+            }
+
+            if processed > 0 {
+                if self.need_redraw {
+                    self.redraw();
+                }
+            } else {
+                debug_assert!(!self.need_redraw);
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
     }
 }
 
 pub fn run(
-    handle: WindowHandle,
+    event_tx: crossbeam_channel::Sender<TemuEvent>,
     event_rx: crossbeam_channel::Receiver<TemuEvent>,
     shared_terminal: Arc<SharedTerminal>,
 ) {
-    let mut local_pool = LocalPool::new();
-    let local_spawner = local_pool.spawner();
+    let mut ctx = WindowContext::new(event_tx, event_rx, shared_terminal);
 
-    let instance = wgpu::Instance::new(wgpu::Backends::all());
-    let viewport = ViewportDesc::new(&instance, &handle);
-    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        compatible_surface: Some(viewport.surface()),
-        ..Default::default()
-    }))
-    .expect("Failed to find an appropriate adapter");
+    log::debug!("Window initialized");
 
-    let (device, queue) = block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor {
-            label: None,
-            features: wgpu::Features::empty(),
-            limits: wgpu::Limits::downlevel_defaults(),
-        },
-        None,
-    ))
-    .expect("Failed to create device");
-
-    let mut ctx = WgpuContext::new(viewport.build(300, 200, &adapter, &device), device, queue);
-
-    let mut need_redraw = true;
-    let mut prev_resize = (300, 200);
-
-    loop {
-        if need_redraw {
-            ctx.redraw(&local_spawner);
-            local_pool.run_until_stalled();
-            need_redraw = false;
-        }
-
-        if let Some(terminal) = shared_terminal.take_terminal() {
-            ctx.terminal = terminal;
-            need_redraw = true;
-        }
-
-        match event_rx.try_recv() {
-            Ok(event) => match event {
-                TemuEvent::Close => {
-                    break;
-                }
-                TemuEvent::Resize { width, height } => {
-                    if prev_resize != (width, height) {
-                        ctx.resize(width, height);
-                        need_redraw = true;
-                        prev_resize = (width, height);
-                    }
-                }
-                TemuEvent::Redraw => {
-                    need_redraw = true;
-                }
-                TemuEvent::ScrollUp => {}
-                TemuEvent::ScrollDown => {}
-            },
-            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                break;
-            }
-            Err(crossbeam_channel::TryRecvError::Empty) => {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-        }
-    }
-}
-
-struct ScrollState {
-    top: u32,
-    max: u32,
-    page_size: u32,
-}
-
-struct ScrollCalcResult {
-    top: f32,
-    bottom: f32,
-}
-
-impl ScrollState {
-    pub fn new() -> Self {
-        Self {
-            top: 0,
-            max: 1,
-            page_size: 1,
-        }
-    }
-
-    pub fn calculate(&self) -> ScrollCalcResult {
-        match self.max.checked_sub(self.top) {
-            None => ScrollCalcResult::FULL,
-            Some(left) => ScrollCalcResult {
-                top: self.top as f32 / self.max as f32,
-                bottom: left as f32 / self.max as f32,
-            },
-        }
-    }
-}
-
-impl ScrollCalcResult {
-    /// Can display all lines
-    const FULL: Self = ScrollCalcResult {
-        top: 0.0,
-        bottom: 1.0,
-    };
-
-    pub fn get_vertexes(&self, width: u32, height: u32) -> [Vertex; 8] {
-        let width = width as f32;
-        let height = height as f32;
-
-        let left = 1.0 - (10.0 / width);
-        let margin_left = 2.5 / width;
-        let margin_top = 2.0 / height;
-
-        let inner_top = (1.0 - margin_top * 2.0) * self.top;
-        let inner_bottom = (1.0 - margin_top * 2.0) * self.bottom;
-
-        [
-            Vertex {
-                position: [left, 1.0],
-                color: BAR_BG_COLOR,
-            },
-            Vertex {
-                position: [1.0, 1.0],
-                color: BAR_BG_COLOR,
-            },
-            Vertex {
-                position: [left, -1.0],
-                color: BAR_BG_COLOR,
-            },
-            Vertex {
-                position: [1.0, -1.0],
-                color: BAR_BG_COLOR,
-            },
-            Vertex {
-                position: [left + margin_left, inner_top],
-                color: BAR_COLOR,
-            },
-            Vertex {
-                position: [1.0 - margin_left, inner_top],
-                color: BAR_COLOR,
-            },
-            Vertex {
-                position: [left + margin_left, inner_bottom],
-                color: BAR_COLOR,
-            },
-            Vertex {
-                position: [1.0 - margin_left, inner_bottom],
-                color: BAR_COLOR,
-            },
-        ]
-    }
+    ctx.event_loop();
 }

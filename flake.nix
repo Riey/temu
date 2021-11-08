@@ -17,10 +17,8 @@
             pkg-config
           ];
           buildInputs = with pkgs; [
-            libGL
-            wayland.dev
             libxkbcommon
-            vulkan-loader
+            wayland
           ];
         };
     });
