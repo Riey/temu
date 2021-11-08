@@ -2,7 +2,6 @@ mod event;
 mod render;
 mod term;
 
-use crate::render::WindowHandle;
 use crate::{event::TemuEvent, term::SharedTerminal};
 use std::{convert::TryInto, sync::Arc};
 
@@ -25,7 +24,7 @@ event_enum!(
 );
 
 fn main() {
-    let (event_tx, event_rx) = crossbeam_channel::bounded(64);
+    let (event_tx, event_rx) = self::event::channel();
 
     env_logger::init();
 
@@ -54,8 +53,6 @@ fn main() {
         .instantiate_exact::<wl_compositor::WlCompositor>(1)
         .unwrap();
     let surface = compositor.create_surface();
-
-    let handle = WindowHandle::new(&surface, &display);
 
     let xdg_wm_base = globals
         .instantiate_exact::<xdg_wm_base::XdgWmBase>(2)
@@ -88,6 +85,10 @@ fn main() {
             height,
             states,
         } => {
+            if width == 0 || height == 0 {
+                return;
+            }
+
             let states = states
                 .windows(4)
                 .filter_map(|state| {
@@ -191,11 +192,14 @@ fn main() {
 
     surface.commit();
 
+    let surface = surface.detach();
+
     let shared = Arc::new(SharedTerminal::new());
 
     let shared_inner = shared.clone();
+    let tx_inner = event_tx.clone();
     std::thread::spawn(move || {
-        render::run(handle, event_rx, shared_inner);
+        render::run(tx_inner, event_rx, shared_inner, display, surface);
     });
 
     std::thread::spawn(move || {
