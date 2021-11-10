@@ -1,23 +1,25 @@
 mod viewport;
 
-use std::{sync::Arc, time::Instant};
-
-use crate::{
-    event::TemuEvent,
-    term::{SharedTerminal, Terminal},
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
 };
+
+use crate::term::{SharedTerminal, Terminal};
 use bytemuck::{Pod, Zeroable};
+use crossbeam_channel::Receiver;
 use futures_executor::{block_on, LocalPool, LocalSpawner};
 use futures_task::{LocalFutureObj, LocalSpawn};
+use temu_window::TemuEvent;
 use wgpu::util::DeviceExt;
 use wgpu_glyph::{
-    ab_glyph::{Font, FontRef, PxScale, ScaleFont},
+    ab_glyph::{Font, FontRef, PxScale},
     GlyphBrush, GlyphBrushBuilder, Layout, Section, Text,
 };
 
-pub use self::viewport::{Viewport, ViewportDesc, WindowHandle};
+pub use self::viewport::Viewport;
 
-const FONT: &[u8] = include_bytes!("/nix/store/lkc45rnr4dqq2ig9ahh817c31j4kxlnq-nerdfonts-2.1.0/share/fonts/truetype/NerdFonts/Hack Bold Nerd Font Complete.ttf");
+const FONT: &[u8] = include_bytes!("../iosevka.ttc");
 const BAR_BG_COLOR: [f32; 3] = [0.5; 3];
 const BAR_COLOR: [f32; 3] = [0.3; 3];
 // const SHADER: &str = include_str!("../shaders/shader.wgsl");
@@ -239,7 +241,10 @@ impl WgpuContext {
     }
 
     pub fn redraw(&mut self, spawner: &LocalSpawner) {
-        let start = Instant::now();
+        let frame = match self.viewport.get_current_texture() {
+            Some(frame) => frame,
+            None => return,
+        };
 
         if self.cursor_vertex_outdated {
             let cursor_x = self.terminal.cursor().0 as u32 * self.font_width;
@@ -264,7 +269,6 @@ impl WgpuContext {
             self.cursor_vertex_outdated = false;
         }
 
-        let frame = self.viewport.get_current_texture();
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
             ..Default::default()
         });
@@ -355,24 +359,35 @@ impl WgpuContext {
         spawner
             .spawn_local_obj(LocalFutureObj::new(Box::new(self.staging_belt.recall())))
             .unwrap();
+    }
+}
 
-        let elapsed = Instant::now() - start;
-        println!("Elapsed: {}ms", elapsed.as_millis());
+fn wait_size(event_rx: &Receiver<TemuEvent>) -> (u32, u32) {
+    loop {
+        let e = event_rx.recv().unwrap();
+        match e {
+            TemuEvent::Resize { width, height } => {
+                return (width, height);
+            }
+            _ => {}
+        }
     }
 }
 
 pub fn run(
-    handle: WindowHandle,
+    instance: wgpu::Instance,
+    surface: wgpu::Surface,
     event_rx: crossbeam_channel::Receiver<TemuEvent>,
     shared_terminal: Arc<SharedTerminal>,
 ) {
     let mut local_pool = LocalPool::new();
     let local_spawner = local_pool.spawner();
 
-    let instance = wgpu::Instance::new(wgpu::Backends::all());
-    let viewport = ViewportDesc::new(&instance, &handle);
+    let mut need_redraw = true;
+    let mut prev_resize = wait_size(&event_rx);
+
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        compatible_surface: Some(viewport.surface()),
+        compatible_surface: Some(&surface),
         ..Default::default()
     }))
     .expect("Failed to find an appropriate adapter");
@@ -387,16 +402,24 @@ pub fn run(
     ))
     .expect("Failed to create device");
 
-    let mut ctx = WgpuContext::new(viewport.build(300, 200, &adapter, &device), device, queue);
-
-    let mut need_redraw = true;
-    let mut prev_resize = (300, 200);
+    let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
+    let mut ctx = WgpuContext::new(viewport, device, queue);
+    let mut next_render_time = Instant::now();
+    const FPS: u64 = 60;
+    const FRAMETIME: Duration = Duration::from_millis(1000 / FPS);
 
     loop {
         if need_redraw {
+            let now = Instant::now();
+
+            if now < next_render_time {
+                std::thread::sleep(next_render_time - now);
+            }
+
             ctx.redraw(&local_spawner);
             local_pool.run_until_stalled();
             need_redraw = false;
+            next_render_time = now + FRAMETIME;
         }
 
         if let Some(terminal) = shared_terminal.take_terminal() {

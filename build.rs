@@ -1,4 +1,7 @@
 fn main() {
-    println!("cargo:rustc-link-lib=vulkan");
-    println!("cargo:rustc-link-lib=EGL");
+    #[cfg(unix)]
+    {
+        println!("cargo:rustc-link-lib=vulkan");
+        println!("cargo:rustc-link-lib=EGL");
+    }
 }

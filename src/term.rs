@@ -1,14 +1,9 @@
 mod grid;
 
 use parking_lot::Mutex;
-use portable_pty::{
-    native_pty_system, Child, CommandBuilder, MasterPty, PtySize, PtySystem, SlavePty,
-};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::{
-    env,
-    fs::File,
     io::{self, Read, Write},
-    os::unix::prelude::FromRawFd,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -18,7 +13,7 @@ use termwiz::escape::parser::Parser;
 
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::event::{TemuEvent, TemuPtyEvent};
+use temu_window::{TemuEvent, TemuPtyEvent};
 
 pub use self::grid::{Cell, Terminal};
 
@@ -114,7 +109,7 @@ pub fn run(
 fn start_pty() -> (Box<dyn MasterPty + Send>, Box<dyn Child + Send + Sync>) {
     let pty = native_pty_system();
 
-    let mut pair = pty
+    let pair = pty
         .openpty(PtySize {
             cols: 100,
             rows: 60,
@@ -123,7 +118,10 @@ fn start_pty() -> (Box<dyn MasterPty + Send>, Box<dyn Child + Send + Sync>) {
         })
         .unwrap();
 
-    let shell = env::var("SHELL").unwrap();
+    #[cfg(unix)]
+    let shell = std::env::var("SHELL").unwrap();
+    #[cfg(windows)]
+    let shell = "powershell";
     let cmd = CommandBuilder::new(shell);
     let child = pair.slave.spawn_command(cmd).unwrap();
 

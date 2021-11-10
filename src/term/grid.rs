@@ -2,7 +2,7 @@ use grid::Grid;
 use std::iter;
 use termwiz::escape::{
     csi::{Cursor, Edit, EraseInDisplay},
-    Action, ControlCode, Esc, EscCode, CSI,
+    Action, ControlCode, CSI,
 };
 
 #[derive(Clone, Copy)]
