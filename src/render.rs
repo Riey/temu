@@ -19,7 +19,7 @@ use wgpu_glyph::{
 
 pub use self::viewport::Viewport;
 
-const FONT: &[u8] = include_bytes!("../iosevka.ttc");
+const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 const BAR_BG_COLOR: [f32; 3] = [0.5; 3];
 const BAR_COLOR: [f32; 3] = [0.3; 3];
 // const SHADER: &str = include_str!("../shaders/shader.wgsl");
@@ -377,14 +377,13 @@ fn wait_size(event_rx: &Receiver<TemuEvent>) -> (u32, u32) {
 pub fn run(
     instance: wgpu::Instance,
     surface: wgpu::Surface,
-    event_rx: crossbeam_channel::Receiver<TemuEvent>,
+    event_rx: Receiver<TemuEvent>,
     shared_terminal: Arc<SharedTerminal>,
 ) {
     let mut local_pool = LocalPool::new();
     let local_spawner = local_pool.spawner();
 
     let mut need_redraw = true;
-    let mut prev_resize = wait_size(&event_rx);
 
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         compatible_surface: Some(&surface),
@@ -401,6 +400,8 @@ pub fn run(
         None,
     ))
     .expect("Failed to create device");
+
+    let mut prev_resize = wait_size(&event_rx);
 
     let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
     let mut ctx = WgpuContext::new(viewport, device, queue);

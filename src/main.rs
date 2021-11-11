@@ -11,6 +11,7 @@ fn main() {
 
     env_logger::init();
 
+    log::info!("Init window");
     let window = init_native_window(event_tx.clone(), pty_event_tx);
     let instance = wgpu::Instance::new(wgpu::Backends::all());
     let surface = unsafe { instance.create_surface(&window) };
@@ -25,5 +26,6 @@ fn main() {
         term::run(event_tx, pty_event_rx, shared);
     });
 
+    log::info!("Start window");
     window.run();
 }

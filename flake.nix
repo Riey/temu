@@ -21,6 +21,7 @@
             wayland.dev
             libxkbcommon
             vulkan-loader
+            vulkan-validation-layers
             freetype
             fontconfig
           ];

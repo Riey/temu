@@ -1,15 +1,20 @@
 [package]
 name = "temu-window"
 version = "0.1.0"
-edition = "2021"
+edition = "2018"
+
+[features]
+default = ["winit"]
 
 [dependencies]
 crossbeam-channel = "0.5.1"
 log = "0.4.14"
 raw-window-handle = "0.3.3"
+winit = { git = "https://github.com/rust-windowing/winit", optional = true, default-features = false, features = ["x11", "wayland"] }
 
 [target.'cfg(windows)'.dependencies.windows]
-version = "0.24"
+version = "0.26"
+optional = true
 features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
@@ -17,8 +22,3 @@ features = [
     "Win32_System_LibraryLoader",
     "Win32_UI_WindowsAndMessaging",
 ]
-
-[target.'cfg(unix)'.dependencies]
-wayland-client = { version = "0.29.1", default-features = false, features = ["use_system_lib"] }
-wayland-egl = "0.29.1"
-wayland-protocols = { version = "0.29.1", features = ["client", "unstable_protocols"] }
