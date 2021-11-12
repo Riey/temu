@@ -24,11 +24,16 @@ impl crate::TemuWindow for WinitWindow {
     fn init(event_tx: Sender<TemuEvent>, pty_event_tx: Sender<TemuPtyEvent>) -> Self {
         let event_loop = EventLoop::new();
         let inner = WindowBuilder::new()
-            .with_inner_size(LogicalSize::new(300, 200))
+            .with_inner_size(LogicalSize::new(600, 400))
             .build(&event_loop)
             .unwrap();
 
-        event_tx.send(TemuEvent::Resize { width: 300, height: 200 }).unwrap();
+        event_tx
+            .send(TemuEvent::Resize {
+                width: 600,
+                height: 400,
+            })
+            .unwrap();
 
         Self {
             inner,

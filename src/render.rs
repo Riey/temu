@@ -56,7 +56,7 @@ pub struct WgpuContext {
     outter_pipeline: wgpu::RenderPipeline,
     scroll_state: ScrollState,
     terminal: Terminal,
-    str_buf: Vec<u8>,
+    str_buf: String,
     font_width: u32,
     cursor_vertex_outdated: bool,
 }
@@ -224,7 +224,7 @@ impl WgpuContext {
             scroll_state,
             terminal: Terminal::new(100),
             font_width,
-            str_buf: vec![0; 1024 * 16],
+            str_buf: String::new(),
             cursor_vertex_outdated: false,
         }
     }
@@ -316,27 +316,24 @@ impl WgpuContext {
             let foreground = [a as f32, r as f32, g as f32, b as f32];
             let mut y = 0.0;
 
-            for row in self.terminal.rows() {
-                let mut str_buf = &mut self.str_buf[..];
-                let mut texts = Vec::with_capacity(row.len());
-                for cell in row {
-                    let len = cell.ch.len_utf8();
-                    let (utf_8, left) = str_buf.split_at_mut(len);
-                    str_buf = left;
+            let page_count = self.viewport.height() / FONT_SIZE;
+            let start = self
+                .terminal
+                .rows()
+                .len()
+                .saturating_sub(page_count as usize);
 
-                    texts.push(
-                        Text::new(cell.ch.encode_utf8(utf_8))
-                            .with_color(foreground)
-                            .with_scale(PxScale::from(FONT_SIZE as f32)),
-                    );
-                }
+            for row in self.terminal.rows().skip(start) {
+                row.write_text(&mut self.str_buf);
                 self.glyph.queue(Section {
-                    text: texts,
+                    text: vec![Text::new(&self.str_buf)
+                        .with_color(foreground)
+                        .with_scale(PxScale::from(FONT_SIZE as f32))],
                     screen_position: (0.0, y),
-                    bounds: ((self.viewport.width() - 10) as f32, f32::INFINITY),
                     layout: Layout::default_single_line(),
                     ..Default::default()
                 });
+                self.str_buf.clear();
 
                 y += FONT_SIZE as f32;
             }

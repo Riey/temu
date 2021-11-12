@@ -65,7 +65,9 @@ pub fn run(
         for ev in pty_event_rx {
             match ev {
                 TemuPtyEvent::Char(c) => {
-                    output.write_all(c.encode_utf8(&mut buf).as_bytes()).unwrap();
+                    output
+                        .write_all(c.encode_utf8(&mut buf).as_bytes())
+                        .unwrap();
                 }
             }
         }
@@ -108,8 +110,8 @@ fn start_pty() -> (Box<dyn MasterPty + Send>, Box<dyn Child + Send + Sync>) {
 
     let pair = pty
         .openpty(PtySize {
-            cols: 100,
-            rows: 60,
+            cols: 60,
+            rows: 20,
             pixel_width: 0,
             pixel_height: 0,
         })
