@@ -250,7 +250,7 @@ impl WgpuContext {
             let cursor_x = self.terminal.cursor().0 as u32 * self.font_width;
             let cursor_y = self.terminal.cursor().1 as u32 * FONT_SIZE;
 
-            dbg!(cursor_x, cursor_y);
+            // dbg!(cursor_x, cursor_y);
 
             self.queue.write_buffer(
                 &self.cursor_vertex_buf,

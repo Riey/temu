@@ -61,14 +61,11 @@ pub fn run(
     let mut output = master.try_clone_writer().unwrap();
 
     std::thread::spawn(move || {
+        let mut buf = [0u8; 8];
         for ev in pty_event_rx {
             match ev {
-                TemuPtyEvent::Enter => {
-                    output.write_all(b"\r").unwrap();
-                }
-                TemuPtyEvent::Text(t) => {
-                    log::debug!("Write: {}", t);
-                    output.write_all(t.as_bytes()).unwrap();
+                TemuPtyEvent::Char(c) => {
+                    output.write_all(c.encode_utf8(&mut buf).as_bytes()).unwrap();
                 }
             }
         }

@@ -7,6 +7,5 @@ pub enum TemuEvent {
 }
 
 pub enum TemuPtyEvent {
-    Enter,
-    Text(String),
+    Char(char),
 }

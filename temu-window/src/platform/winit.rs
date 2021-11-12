@@ -65,6 +65,9 @@ impl crate::TemuWindow for WinitWindow {
                             })
                             .ok();
                     }
+                    WindowEvent::ReceivedCharacter(c) => {
+                        pty_event_tx.send(TemuPtyEvent::Char(c)).ok();
+                    }
                     _ => {}
                 },
                 _ => {}
