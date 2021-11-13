@@ -26,8 +26,9 @@ wgpu = "0.11.0"
 
 portable-pty = "0.5.0"
 crossbeam-channel = "0.5.1"
-ttf-parser = "0.13.2"
 lyon = "0.17.10"
+rustybuzz = "0.4.0"
+ttf-parser = "0.12"
 
 [features]
 

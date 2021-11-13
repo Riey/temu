@@ -61,6 +61,26 @@ fn cell_vs(
 }
 
 [[stage(fragment)]]
-fn cell_fs(in: VertexOutput) -> [[location(0)]] vec4<f32> {
+fn simple_fs(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     return in.color;
+}
+
+struct LyonInput {
+    [[builtin(vertex_index)]] vertex_index: u32;
+    [[location(0)]] position: vec2<f32>;
+};
+
+struct LyonOutput {
+    [[builtin(position)]] position: vec4<f32>;
+    [[location(0)]] color: vec4<f32>;
+};
+
+[[stage(vertex)]]
+fn lyon_vs(model: LyonInput) -> VertexOutput {
+    let scale = window_size.cell_size / window_size.size;
+    // let position = model.position;
+    var position = model.position * scale + vec2<f32>(-1.0, 1.0 - scale.y);
+    // position.x = position.x * 2.0 - 1.0;
+    // position.y = position.y * 2.0;
+    return VertexOutput(vec4<f32>(position, 1.0, 1.0), vec4<f32>(1.0));
 }
