@@ -1,3 +1,5 @@
+mod cell;
+mod lyon;
 mod viewport;
 
 use std::{
@@ -5,13 +7,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use self::{cell::CellContext, lyon::LyonContext};
 use crate::term::{SharedTerminal, Terminal};
-use bytemuck::{Pod, Zeroable};
 use crossbeam_channel::Receiver;
 use futures_executor::{block_on, LocalPool, LocalSpawner};
 use futures_task::{LocalFutureObj, LocalSpawn};
 use temu_window::TemuEvent;
-use wgpu::util::DeviceExt;
+use ttf_parser::{Face, GlyphId};
 use wgpu_glyph::{
     ab_glyph::{Font, FontRef, PxScale},
     GlyphBrush, GlyphBrushBuilder, Layout, Section, Text,
@@ -20,45 +22,24 @@ use wgpu_glyph::{
 pub use self::viewport::Viewport;
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
-const BAR_BG_COLOR: [f32; 3] = [0.5; 3];
-const BAR_COLOR: [f32; 3] = [0.3; 3];
-// const SHADER: &str = include_str!("../shaders/shader.wgsl");
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-struct Vertex {
-    position: [f32; 2],
-    color: [f32; 3],
-}
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-struct WindowSize {
-    size: [f32; 2],
-}
-
-const SCROLLBAR_INDICES: &[u16] = &[0, 1, 2, 1, 2, 3];
 const FONT_SIZE: u32 = 18;
 
 #[allow(unused)]
 pub struct WgpuContext {
     viewport: Viewport,
     glyph: GlyphBrush<(), FontRef<'static>>,
+    face: Face<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    cell_ctx: CellContext,
+    lyon_ctx: LyonContext,
     staging_belt: wgpu::util::StagingBelt,
-    vertex_buf: wgpu::Buffer,
-    rect_index_buf: wgpu::Buffer,
-    cursor_vertex_buf: wgpu::Buffer,
-    window_size_buf: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
-    inner_pipeline: wgpu::RenderPipeline,
-    outter_pipeline: wgpu::RenderPipeline,
     scroll_state: ScrollState,
     terminal: Terminal,
     str_buf: String,
     font_width: u32,
-    cursor_vertex_outdated: bool,
 }
 
 impl WgpuContext {
@@ -68,108 +49,7 @@ impl WgpuContext {
         scroll_state.top = 10;
         scroll_state.max = 50;
 
-        let window_size_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("size_bind_group_layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
-
-        let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-            label: Some("shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                std::fs::read_to_string("shaders/shader.wgsl")
-                    .unwrap()
-                    .into(),
-            ),
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&window_size_bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        // Create window size
-        let window_size = WindowSize {
-            size: [viewport.width() as _, viewport.height() as _],
-        };
-
-        let window_size_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("WindowSize Buffer"),
-            contents: bytemuck::cast_slice(&[window_size]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        // Create bind group
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &window_size_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: window_size_buf.as_entire_binding(),
-            }],
-            label: Some("WindowSize bind_group"),
-        });
-
-        let vertex_buffers = [wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as _,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![
-                0 => Float32x2,
-                1 => Float32x3,
-            ],
-        }];
-
-        let outter_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scrollbar_outter"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "rect_vs",
-                buffers: &vertex_buffers,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "rect_fs",
-                targets: &[viewport.format().into()],
-            }),
-            primitive: wgpu::PrimitiveState {
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                ..Default::default()
-            },
-        });
-
-        let inner_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scrollbar_inner"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "rect_vs",
-                buffers: &vertex_buffers,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "rect_round_fs",
-                targets: &[viewport.format().into()],
-            }),
-            primitive: wgpu::PrimitiveState {
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                ..Default::default()
-            },
-        });
+        let face = Face::from_slice(FONT, 0).unwrap();
 
         let font = FontRef::try_from_slice(FONT).unwrap();
         let m_glyph = font.glyph_id('M');
@@ -177,67 +57,29 @@ impl WgpuContext {
             .glyph_bounds(&m_glyph.with_scale(PxScale::from(FONT_SIZE as f32)))
             .width() as u32;
 
-        let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Scrollbar Outter Vertex Buffer"),
-            contents: bytemuck::cast_slice(
-                &scroll_state
-                    .calculate()
-                    .get_vertexes(viewport.width(), viewport.height()),
-            ),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let cursor_vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Cursor Vertex Buffer"),
-            contents: bytemuck::cast_slice(&get_cursor_vertexes(
-                viewport.width(),
-                viewport.height(),
-                300,
-                0,
-                font_width,
-                FONT_SIZE,
-                [1.0; 3],
-            )),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(SCROLLBAR_INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
         Self {
+            cell_ctx: CellContext::new(&device, &viewport),
+            lyon_ctx: LyonContext::new(&device, &viewport),
+            face,
             glyph: GlyphBrushBuilder::using_font(FontRef::try_from_slice(FONT).unwrap())
                 .build(&device, viewport.format()),
             viewport,
             staging_belt: wgpu::util::StagingBelt::new(1024),
             device,
             queue,
-            vertex_buf,
-            cursor_vertex_buf,
-            inner_pipeline,
-            outter_pipeline,
-            rect_index_buf: index_buf,
-            window_size_buf,
-            bind_group,
             scroll_state,
             terminal: Terminal::new(100),
             font_width,
             str_buf: String::new(),
-            cursor_vertex_outdated: false,
         }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         log::info!("Resize({}, {})", width, height);
-        // TODO: update scroll_state
+
+        self.cell_ctx.resize(&self.queue, width, height);
         self.viewport.resize(&self.device, width, height);
-        self.queue.write_buffer(
-            &self.vertex_buf,
-            0,
-            bytemuck::cast_slice(&self.scroll_state.calculate().get_vertexes(width, height)),
-        );
+        // TODO: update scroll_state
     }
 
     pub fn redraw(&mut self, spawner: &LocalSpawner) {
@@ -245,29 +87,6 @@ impl WgpuContext {
             Some(frame) => frame,
             None => return,
         };
-
-        if self.cursor_vertex_outdated {
-            let cursor_x = self.terminal.cursor().0 as u32 * self.font_width;
-            let cursor_y = self.terminal.cursor().1 as u32 * FONT_SIZE;
-
-            // dbg!(cursor_x, cursor_y);
-
-            self.queue.write_buffer(
-                &self.cursor_vertex_buf,
-                0,
-                bytemuck::cast_slice(&get_cursor_vertexes(
-                    self.viewport.width(),
-                    self.viewport.height(),
-                    cursor_x,
-                    cursor_y,
-                    self.font_width,
-                    FONT_SIZE,
-                    [1.0; 3],
-                )),
-            );
-
-            self.cursor_vertex_outdated = false;
-        }
 
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
             ..Default::default()
@@ -283,72 +102,68 @@ impl WgpuContext {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.viewport.background()),
+                        load: wgpu::LoadOp::Load,
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: None,
             });
 
-            rpass.set_bind_group(0, &self.bind_group, &[]);
-            rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-            rpass.set_index_buffer(self.rect_index_buf.slice(..), wgpu::IndexFormat::Uint16);
-            rpass.set_pipeline(&self.outter_pipeline);
+            self.cell_ctx.draw(&mut rpass);
 
-            rpass.push_debug_group("Draw outter");
-            rpass.draw_indexed(0..6, 0, 0..1);
-            rpass.pop_debug_group();
-
-            rpass.push_debug_group("Draw inner");
-            // rounded rect is not yet implemented
-            // rpass.set_pipeline(&self.inner_pipeline);
-            rpass.draw_indexed(0..6, 4, 0..1);
-            rpass.pop_debug_group();
-
-            rpass.push_debug_group("Draw cursor");
-            rpass.set_vertex_buffer(0, self.cursor_vertex_buf.slice(..));
-            rpass.draw_indexed(0..6, 0, 0..1);
-            rpass.pop_debug_group();
+            // let mut tess = FillTessellator::new();
+            // let mut builder = LyonBuilder {
+            //     builder: Builder::new(),
+            // };
+            // self.face.outline_glyph(GlyphId(0), &mut builder);
+            // let mut mesh = VertexBuffers::<LyonVertex, u32>::new();
+            // let path = builder.builder.build();
+            // tess.tessellate_path(
+            //     &path,
+            //     &FillOptions::default(),
+            //     &mut BuffersBuilder::new(&mut mesh, VertexCtor {}),
+            // )
+            // .unwrap();
         }
 
-        {
-            let wgpu::Color { a, r, g, b } = self.viewport.foreground();
-            let foreground = [a as f32, r as f32, g as f32, b as f32];
-            let mut y = 0.0;
+        // {
+        //     let wgpu::Color { a, r, g, b } = self.viewport.foreground();
+        //     let foreground = [a as f32, r as f32, g as f32, b as f32];
+        //     let mut y = 0.0;
 
-            let page_count = self.viewport.height() / FONT_SIZE;
-            let start = self
-                .terminal
-                .rows()
-                .len()
-                .saturating_sub(page_count as usize);
+        //     let page_count = self.viewport.height() / FONT_SIZE;
+        //     let start = self
+        //         .terminal
+        //         .rows()
+        //         .len()
+        //         .saturating_sub(page_count as usize);
 
-            for row in self.terminal.rows().skip(start) {
-                row.write_text(&mut self.str_buf);
-                self.glyph.queue(Section {
-                    text: vec![Text::new(&self.str_buf)
-                        .with_color(foreground)
-                        .with_scale(PxScale::from(FONT_SIZE as f32))],
-                    screen_position: (0.0, y),
-                    layout: Layout::default_single_line(),
-                    ..Default::default()
-                });
-                self.str_buf.clear();
+        //     for row in self.terminal.rows().skip(start) {
+        //         row.write_text(&mut self.str_buf);
+        //         self.glyph.queue(Section {
+        //             text: vec![Text::new(&self.str_buf)
+        //                 .with_color(foreground)
+        //                 .with_scale(PxScale::from(FONT_SIZE as f32))],
+        //             screen_position: (0.0, y),
+        //             layout: Layout::default_single_line(),
+        //             ..Default::default()
+        //         });
+        //         self.str_buf.clear();
 
-                y += FONT_SIZE as f32;
-            }
+        //         y += FONT_SIZE as f32;
+        //     }
 
-            self.glyph
-                .draw_queued(
-                    &self.device,
-                    &mut self.staging_belt,
-                    &mut encoder,
-                    &view,
-                    self.viewport.width(),
-                    self.viewport.height(),
-                )
-                .unwrap();
-        }
+        //     self.glyph
+        //         .draw_queued(
+        //             &self.device,
+        //             &mut self.staging_belt,
+        //             &mut encoder,
+        //             &view,
+        //             self.viewport.width(),
+        //             self.viewport.height(),
+        //         )
+        //         .unwrap();
+        // }
 
         self.staging_belt.finish();
         self.queue.submit(Some(encoder.finish()));
@@ -422,7 +237,6 @@ pub fn run(
 
         if let Some(terminal) = shared_terminal.take_terminal() {
             ctx.terminal = terminal;
-            ctx.cursor_vertex_outdated = true;
             need_redraw = true;
         }
 
@@ -485,95 +299,10 @@ impl ScrollState {
     }
 }
 
-fn get_cursor_vertexes(
-    width: u32,
-    height: u32,
-    cursor_x: u32,
-    cursor_y: u32,
-    font_width: u32,
-    font_height: u32,
-    color: [f32; 3],
-) -> [Vertex; 4] {
-    let width = width as f32;
-    let height = height as f32;
-
-    let x = cursor_x as f32 / width;
-    let y = cursor_y as f32 / width;
-
-    let width = font_width as f32 / width;
-    let height = font_height as f32 / height;
-
-    [
-        Vertex {
-            position: [x, y],
-            color,
-        },
-        Vertex {
-            position: [x + width, y],
-            color,
-        },
-        Vertex {
-            position: [x, y + height],
-            color,
-        },
-        Vertex {
-            position: [x + width, y + height],
-            color,
-        },
-    ]
-}
-
 impl ScrollCalcResult {
     /// Can display all lines
     const FULL: Self = ScrollCalcResult {
         top: 0.0,
         bottom: 1.0,
     };
-
-    pub fn get_vertexes(&self, width: u32, height: u32) -> [Vertex; 8] {
-        let width = width as f32;
-        let height = height as f32;
-
-        let left = 1.0 - (30.0 / width);
-        let margin_left = 2.5 / width;
-        let margin_top = 2.0 / height;
-
-        let inner_top = (1.0 - margin_top * 2.0) * self.top;
-        let inner_bottom = (1.0 - margin_top * 2.0) * self.bottom;
-
-        [
-            Vertex {
-                position: [left, 1.0],
-                color: BAR_BG_COLOR,
-            },
-            Vertex {
-                position: [1.0, 1.0],
-                color: BAR_BG_COLOR,
-            },
-            Vertex {
-                position: [left, -1.0],
-                color: BAR_BG_COLOR,
-            },
-            Vertex {
-                position: [1.0, -1.0],
-                color: BAR_BG_COLOR,
-            },
-            Vertex {
-                position: [left + margin_left, inner_top],
-                color: BAR_COLOR,
-            },
-            Vertex {
-                position: [1.0 - margin_left, inner_top],
-                color: BAR_COLOR,
-            },
-            Vertex {
-                position: [left + margin_left, inner_bottom],
-                color: BAR_COLOR,
-            },
-            Vertex {
-                position: [1.0 - margin_left, inner_bottom],
-                color: BAR_COLOR,
-            },
-        ]
-    }
 }

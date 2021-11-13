@@ -27,6 +27,8 @@ wgpu_glyph = "0.15.1"
 
 portable-pty = "0.5.0"
 crossbeam-channel = "0.5.1"
+ttf-parser = "0.13.2"
+lyon = "0.17.10"
 
 [features]
 
