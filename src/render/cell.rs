@@ -115,8 +115,8 @@ impl CellContext {
 
     pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) {
         rpass.push_debug_group("Draw cell");
-        rpass.set_pipeline(&self.pipeline);
         rpass.set_bind_group(0, &self.bind_group, &[]);
+        rpass.set_pipeline(&self.pipeline);
         rpass.set_vertex_buffer(0, self.instances.slice(..));
         rpass.draw(0..4, 0..15);
         rpass.pop_debug_group();

@@ -23,14 +23,12 @@ pub use self::viewport::Viewport;
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 
-
 const FONT_SIZE: u32 = 18;
 
 #[allow(unused)]
 pub struct WgpuContext {
     viewport: Viewport,
     glyph: GlyphBrush<(), FontRef<'static>>,
-    face: Face<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     cell_ctx: CellContext,
@@ -49,8 +47,6 @@ impl WgpuContext {
         scroll_state.top = 10;
         scroll_state.max = 50;
 
-        let face = Face::from_slice(FONT, 0).unwrap();
-
         let font = FontRef::try_from_slice(FONT).unwrap();
         let m_glyph = font.glyph_id('M');
         let font_width = font
@@ -60,7 +56,6 @@ impl WgpuContext {
         Self {
             cell_ctx: CellContext::new(&device, &viewport),
             lyon_ctx: LyonContext::new(&device, &viewport),
-            face,
             glyph: GlyphBrushBuilder::using_font(FontRef::try_from_slice(FONT).unwrap())
                 .build(&device, viewport.format()),
             viewport,
@@ -110,20 +105,7 @@ impl WgpuContext {
             });
 
             self.cell_ctx.draw(&mut rpass);
-
-            // let mut tess = FillTessellator::new();
-            // let mut builder = LyonBuilder {
-            //     builder: Builder::new(),
-            // };
-            // self.face.outline_glyph(GlyphId(0), &mut builder);
-            // let mut mesh = VertexBuffers::<LyonVertex, u32>::new();
-            // let path = builder.builder.build();
-            // tess.tessellate_path(
-            //     &path,
-            //     &FillOptions::default(),
-            //     &mut BuffersBuilder::new(&mut mesh, VertexCtor {}),
-            // )
-            // .unwrap();
+            self.lyon_ctx.draw(&mut rpass);
         }
 
         // {
@@ -217,6 +199,7 @@ pub fn run(
 
     let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
     let mut ctx = WgpuContext::new(viewport, device, queue);
+    ctx.lyon_ctx.set_draw(&ctx.device, 'A');
     let mut next_render_time = Instant::now();
     const FPS: u64 = 60;
     const FRAMETIME: Duration = Duration::from_millis(1000 / FPS);

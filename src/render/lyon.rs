@@ -1,22 +1,33 @@
 use bytemuck::{Pod, Zeroable};
-use lyon::{geom::Point, lyon_tessellation::FillVertexConstructor, path::path::Builder};
+use lyon::{
+    geom::Point,
+    lyon_tessellation::{
+        BuffersBuilder, FillOptions, FillTessellator, FillVertexConstructor, VertexBuffers,
+    },
+    path::path::Builder,
+};
+use ttf_parser::Face;
+use wgpu::util::DeviceExt;
 
 use super::Viewport;
 
 pub struct LyonContext {
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
+    index_count: usize,
     bind_group: wgpu::BindGroup,
     pipeline: wgpu::RenderPipeline,
+    face: Face<'static>,
 }
 
 impl LyonContext {
     pub fn new(device: &wgpu::Device, viewport: &Viewport) -> Self {
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("lyon bind_group_layout"),
-                entries: &[],
-            });
+        let face = Face::from_slice(super::FONT, 0).unwrap();
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("lyon bind_group_layout"),
+            entries: &[],
+        });
 
         let shader = device.create_shader_module(&wgpu::include_wgsl!("../shaders/lyon.wgsl"));
 
@@ -74,13 +85,57 @@ impl LyonContext {
             mapped_at_creation: false,
         });
 
-
         Self {
+            face,
             bind_group,
             index_buf,
             vertex_buf,
+            index_count: 0,
             pipeline,
         }
+    }
+
+    pub fn set_draw(&mut self, device: &wgpu::Device, ch: char) {
+        let glyph = self.face.glyph_index(ch).unwrap();
+
+        let mut tess = FillTessellator::new();
+        let mut builder = LyonBuilder {
+            builder: Builder::new(),
+        };
+        self.face.outline_glyph(glyph, &mut builder);
+        let mut mesh = VertexBuffers::<LyonVertex, u32>::new();
+        let path = builder.builder.build();
+        tess.tessellate_path(
+            &path,
+            &FillOptions::default(),
+            &mut BuffersBuilder::new(&mut mesh, VertexCtor {}),
+        )
+        .unwrap();
+
+        self.vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            contents: bytemuck::cast_slice(&mesh.vertices),
+            label: Some("lyon vertex"),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        self.index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            contents: bytemuck::cast_slice(&mesh.indices),
+            label: Some("lyon index"),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        self.index_count = mesh.indices.len();
+    }
+
+    pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) {
+        if self.index_count == 0 {
+            return;
+        }
+
+        rpass.set_bind_group(0, &self.bind_group, &[]);
+        rpass.set_pipeline(&self.pipeline);
+        rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
+        rpass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
+        rpass.draw_indexed(0..self.index_count as u32, 0, 0..1);
     }
 }
 
@@ -111,7 +166,6 @@ impl ttf_parser::OutlineBuilder for LyonBuilder {
         self.builder.close();
     }
 }
-
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
