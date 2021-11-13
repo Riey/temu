@@ -11,13 +11,13 @@ pub struct CellContext {
 }
 
 impl CellContext {
-    pub fn new(device: &wgpu::Device, viewport: &Viewport) -> Self {
+    pub fn new(device: &wgpu::Device, viewport: &Viewport, cell_size: [f32; 2]) -> Self {
         let shader = device.create_shader_module(&wgpu::include_wgsl!("../shaders/shader.wgsl"));
 
         // Create window size
         let window_size = WindowSize {
             size: [600.0, 400.0],
-            cell_size: [20.0, super::FONT_SIZE as _],
+            cell_size,
             column: 5,
         };
 

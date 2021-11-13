@@ -7,28 +7,21 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub use self::viewport::Viewport;
 use self::{cell::CellContext, lyon::LyonContext};
 use crate::term::{SharedTerminal, Terminal};
 use crossbeam_channel::Receiver;
 use futures_executor::{block_on, LocalPool, LocalSpawner};
 use futures_task::{LocalFutureObj, LocalSpawn};
 use temu_window::TemuEvent;
-use ttf_parser::{Face, GlyphId};
-use wgpu_glyph::{
-    ab_glyph::{Font, FontRef, PxScale},
-    GlyphBrush, GlyphBrushBuilder, Layout, Section, Text,
-};
-
-pub use self::viewport::Viewport;
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 
-const FONT_SIZE: u32 = 18;
+const FONT_SIZE: u32 = 100;
 
 #[allow(unused)]
 pub struct WgpuContext {
     viewport: Viewport,
-    glyph: GlyphBrush<(), FontRef<'static>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     cell_ctx: CellContext,
@@ -37,7 +30,6 @@ pub struct WgpuContext {
     scroll_state: ScrollState,
     terminal: Terminal,
     str_buf: String,
-    font_width: u32,
 }
 
 impl WgpuContext {
@@ -47,24 +39,20 @@ impl WgpuContext {
         scroll_state.top = 10;
         scroll_state.max = 50;
 
-        let font = FontRef::try_from_slice(FONT).unwrap();
-        let m_glyph = font.glyph_id('M');
-        let font_width = font
-            .glyph_bounds(&m_glyph.with_scale(PxScale::from(FONT_SIZE as f32)))
-            .width() as u32;
+        let lyon_ctx = LyonContext::new(&device, &viewport, FONT_SIZE as _);
+        let cell_size = [lyon_ctx.font_width(), lyon_ctx.font_height()];
+
+        dbg!(cell_size);
 
         Self {
-            cell_ctx: CellContext::new(&device, &viewport),
-            lyon_ctx: LyonContext::new(&device, &viewport),
-            glyph: GlyphBrushBuilder::using_font(FontRef::try_from_slice(FONT).unwrap())
-                .build(&device, viewport.format()),
+            lyon_ctx,
+            cell_ctx: CellContext::new(&device, &viewport, cell_size),
             viewport,
             staging_belt: wgpu::util::StagingBelt::new(1024),
             device,
             queue,
             scroll_state,
             terminal: Terminal::new(100),
-            font_width,
             str_buf: String::new(),
         }
     }
@@ -105,7 +93,7 @@ impl WgpuContext {
                 depth_stencil_attachment: None,
             });
 
-            // self.cell_ctx.draw(&mut rpass);
+            self.cell_ctx.draw(&mut rpass);
             self.lyon_ctx.draw(&mut rpass);
         }
 

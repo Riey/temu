@@ -19,15 +19,22 @@ pub struct LyonContext {
     bind_group: wgpu::BindGroup,
     pipeline: wgpu::RenderPipeline,
     face: Face<'static>,
+    font_width: f32,
+    font_height: f32,
 }
 
 impl LyonContext {
-    pub fn new(device: &wgpu::Device, viewport: &Viewport) -> Self {
+    pub fn new(device: &wgpu::Device, viewport: &Viewport, font_height: f32) -> Self {
         let face = Face::from_slice(super::FONT, 0).unwrap();
+        let m_glyph = face.glyph_index('M').unwrap();
+        let rect = face.glyph_bounding_box(m_glyph).unwrap();
+
+        let scale = font_height / rect.height() as f32;
+        let font_width = rect.width() as f32 * scale;
 
         let globals = Globals {
             window_size: [viewport.width() as _, viewport.height() as _],
-            font_size: super::FONT_SIZE as f32,
+            font_size: font_height,
         };
 
         let globals_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -117,7 +124,17 @@ impl LyonContext {
             vertex_buf,
             index_count: 0,
             pipeline,
+            font_height,
+            font_width,
         }
+    }
+
+    pub fn font_height(&self) -> f32 {
+        self.font_height
+    }
+
+    pub fn font_width(&self) -> f32 {
+        self.font_width
     }
 
     pub fn set_draw(&mut self, device: &wgpu::Device, ch: char) {

@@ -18,7 +18,10 @@ struct VertexOutput {
 
 [[stage(vertex)]]
 fn lyon_vs(model: VertexInput) -> VertexOutput {
-    let position = model.position * globals.font_size / globals.window_size;
+    let scale = globals.font_size / globals.window_size.y;
+    var position = model.position * scale + vec2<f32>(-1.0, 1.0 - scale);
+    // position.x = position.x * 2.0 - 1.0;
+    // position.y = position.y * 2.0;
     return VertexOutput(vec4<f32>(position, 1.0, 1.0), vec4<f32>(1.0));
 }
 
