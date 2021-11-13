@@ -12,6 +12,7 @@ use wgpu::util::DeviceExt;
 use super::Viewport;
 
 pub struct LyonContext {
+    globals_buf: wgpu::Buffer,
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     index_count: usize,
@@ -24,16 +25,39 @@ impl LyonContext {
     pub fn new(device: &wgpu::Device, viewport: &Viewport) -> Self {
         let face = Face::from_slice(super::FONT, 0).unwrap();
 
+        let globals = Globals {
+            window_size: [viewport.width() as _, viewport.height() as _],
+            font_size: super::FONT_SIZE as f32,
+        };
+
+        let globals_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("lyon globals buffer"),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            contents: bytemuck::cast_slice(&[globals]),
+        });
+
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("lyon bind_group_layout"),
-            entries: &[],
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
         });
 
         let shader = device.create_shader_module(&wgpu::include_wgsl!("../shaders/lyon.wgsl"));
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layout,
-            entries: &[],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(globals_buf.as_entire_buffer_binding()),
+            }],
             label: Some("lyon bind_group"),
         });
 
@@ -88,6 +112,7 @@ impl LyonContext {
         Self {
             face,
             bind_group,
+            globals_buf,
             index_buf,
             vertex_buf,
             index_count: 0,
@@ -102,13 +127,14 @@ impl LyonContext {
         let mut builder = LyonBuilder {
             builder: Builder::new(),
         };
-        self.face.outline_glyph(glyph, &mut builder);
+        let output = self.face.outline_glyph(glyph, &mut builder).unwrap();
+        let height = output.height() as f32;
         let mut mesh = VertexBuffers::<LyonVertex, u32>::new();
         let path = builder.builder.build();
         tess.tessellate_path(
             &path,
             &FillOptions::default(),
-            &mut BuffersBuilder::new(&mut mesh, VertexCtor {}),
+            &mut BuffersBuilder::new(&mut mesh, VertexCtor { height }),
         )
         .unwrap();
 
@@ -123,7 +149,16 @@ impl LyonContext {
             label: Some("lyon index"),
             usage: wgpu::BufferUsages::INDEX,
         });
+
         self.index_count = mesh.indices.len();
+    }
+
+    pub fn resize(&mut self, queue: &wgpu::Queue, width: u32, height: u32) {
+        queue.write_buffer(
+            &self.globals_buf,
+            0,
+            bytemuck::cast_slice(&[width as f32, height as f32]),
+        );
     }
 
     pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) {
@@ -169,16 +204,27 @@ impl ttf_parser::OutlineBuilder for LyonBuilder {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct Globals {
+    window_size: [f32; 2],
+    font_size: f32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct LyonVertex {
     position: [f32; 2],
 }
 
-struct VertexCtor {}
+struct VertexCtor {
+    height: f32,
+}
 
 impl FillVertexConstructor<LyonVertex> for VertexCtor {
     fn new_vertex(&mut self, vertex: lyon::lyon_tessellation::FillVertex) -> LyonVertex {
+        let [x, y] = vertex.position().to_array();
+
         LyonVertex {
-            position: vertex.position().to_array(),
+            position: [x / self.height, y / self.height],
         }
     }
 }

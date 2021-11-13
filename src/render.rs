@@ -73,6 +73,7 @@ impl WgpuContext {
         log::info!("Resize({}, {})", width, height);
 
         self.cell_ctx.resize(&self.queue, width, height);
+        self.lyon_ctx.resize(&self.queue, width, height);
         self.viewport.resize(&self.device, width, height);
         // TODO: update scroll_state
     }
@@ -104,48 +105,9 @@ impl WgpuContext {
                 depth_stencil_attachment: None,
             });
 
-            self.cell_ctx.draw(&mut rpass);
+            // self.cell_ctx.draw(&mut rpass);
             self.lyon_ctx.draw(&mut rpass);
         }
-
-        // {
-        //     let wgpu::Color { a, r, g, b } = self.viewport.foreground();
-        //     let foreground = [a as f32, r as f32, g as f32, b as f32];
-        //     let mut y = 0.0;
-
-        //     let page_count = self.viewport.height() / FONT_SIZE;
-        //     let start = self
-        //         .terminal
-        //         .rows()
-        //         .len()
-        //         .saturating_sub(page_count as usize);
-
-        //     for row in self.terminal.rows().skip(start) {
-        //         row.write_text(&mut self.str_buf);
-        //         self.glyph.queue(Section {
-        //             text: vec![Text::new(&self.str_buf)
-        //                 .with_color(foreground)
-        //                 .with_scale(PxScale::from(FONT_SIZE as f32))],
-        //             screen_position: (0.0, y),
-        //             layout: Layout::default_single_line(),
-        //             ..Default::default()
-        //         });
-        //         self.str_buf.clear();
-
-        //         y += FONT_SIZE as f32;
-        //     }
-
-        //     self.glyph
-        //         .draw_queued(
-        //             &self.device,
-        //             &mut self.staging_belt,
-        //             &mut encoder,
-        //             &view,
-        //             self.viewport.width(),
-        //             self.viewport.height(),
-        //         )
-        //         .unwrap();
-        // }
 
         self.staging_belt.finish();
         self.queue.submit(Some(encoder.finish()));

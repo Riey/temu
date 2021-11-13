@@ -1,3 +1,11 @@
+[[block]]
+struct Globals {
+    window_size: vec2<f32>;
+    font_size: f32;
+};
+
+[[group(0), binding(0)]] var<uniform> globals: Globals;
+
 struct VertexInput {
     [[builtin(vertex_index)]] vertex_index: u32;
     [[location(0)]] position: vec2<f32>;
@@ -10,7 +18,8 @@ struct VertexOutput {
 
 [[stage(vertex)]]
 fn lyon_vs(model: VertexInput) -> VertexOutput {
-    return VertexOutput(vec4<f32>(model.position, 1.0, 1.0), vec4<f32>(1.0));
+    let position = model.position * globals.font_size / globals.window_size;
+    return VertexOutput(vec4<f32>(position, 1.0, 1.0), vec4<f32>(1.0));
 }
 
 [[stage(fragment)]]
