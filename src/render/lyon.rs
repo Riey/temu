@@ -26,7 +26,13 @@ pub struct LyonContext {
 }
 
 impl LyonContext {
-    pub fn new(device: &wgpu::Device, shader: &wgpu::ShaderModule, pipeline_layout: &wgpu::PipelineLayout, viewport: &Viewport, font_height: f32) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        shader: &wgpu::ShaderModule,
+        pipeline_layout: &wgpu::PipelineLayout,
+        viewport: &Viewport,
+        font_height: f32,
+    ) -> Self {
         let face = Face::from_slice(super::FONT, 0).unwrap();
         let m_glyph = face.glyph_index('M').unwrap();
         let rect = face.glyph_bounding_box(m_glyph).unwrap();

@@ -42,20 +42,19 @@ impl WgpuContext {
         scroll_state.top = 10;
         scroll_state.max = 50;
 
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("size_bind_group_layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("size_bind_group_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
@@ -65,7 +64,13 @@ impl WgpuContext {
 
         let shader = device.create_shader_module(&wgpu::include_wgsl!("shaders/shader.wgsl"));
 
-        let lyon_ctx = LyonContext::new(&device, &shader, &pipeline_layout, &viewport, FONT_SIZE as _);
+        let lyon_ctx = LyonContext::new(
+            &device,
+            &shader,
+            &pipeline_layout,
+            &viewport,
+            FONT_SIZE as _,
+        );
         let cell_size = [lyon_ctx.font_width(), lyon_ctx.font_height()];
 
         // Create window size
@@ -84,12 +89,10 @@ impl WgpuContext {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("window size bind group"),
             layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(window_size_buf.as_entire_buffer_binding()),
-                }
-            ]
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(window_size_buf.as_entire_buffer_binding()),
+            }],
         });
 
         dbg!(cell_size);
@@ -112,10 +115,11 @@ impl WgpuContext {
     pub fn resize(&mut self, width: u32, height: u32) {
         log::info!("Resize({}, {})", width, height);
 
-        self.queue.write_buffer(&self.window_size_buf, 0, bytemuck::cast_slice(&[
-            width as f32,
-            height as f32,
-        ]));
+        self.queue.write_buffer(
+            &self.window_size_buf,
+            0,
+            bytemuck::cast_slice(&[width as f32, height as f32]),
+        );
         self.viewport.resize(&self.device, width, height);
         // TODO: update scroll_state
     }
