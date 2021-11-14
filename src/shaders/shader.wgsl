@@ -9,9 +9,9 @@ struct WindowSizeUniform {
 
 struct VertexInput {
     [[builtin(vertex_index)]] vertex_index: u32;
-    [[location(0)]] cell_index: u32;
-    [[location(1)]] color: vec4<f32>;
-    [[location(2)]] bg_color: vec4<f32>;
+    [[builtin(instance_index)]] cell_index: u32;
+    [[location(0)]] color: vec4<f32>;
+    [[location(1)]] bg_color: vec4<f32>;
 };
 
 struct VertexOutput {
