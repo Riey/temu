@@ -37,8 +37,8 @@ fn cell_vs(
     let tex_row = left / window_size.texture_count.x;
     let tex_column = left % window_size.texture_count.x;
 
-    let tex_bottom = f32(tex_row) * window_size.cell_size.y;
-    let tex_top = tex_bottom + window_size.cell_size.y;
+    let tex_top = f32(tex_row) * window_size.cell_size.y;
+    let tex_bottom = tex_top + window_size.cell_size.y;
     let tex_left = f32(tex_column) * window_size.cell_size.x;
     let tex_right = tex_left + window_size.cell_size.x;
 
@@ -90,6 +90,6 @@ fn cell_vs(
 [[stage(fragment)]]
 fn simple_fs(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     let alpha = textureSample(font_texture, font_sampler, in.tex_position, in.layer).r;
-    let color = vec4<f32>(alpha);
+    let color = vec4<f32>(in.color * alpha, alpha);
     return color;
 }

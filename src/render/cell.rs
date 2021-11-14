@@ -32,11 +32,8 @@ impl CellContext {
         )
         .unwrap();
 
-        let font_height = font
-            .horizontal_line_metrics(font_size)
-            .unwrap()
-            .new_line_size;
-        let font_width = font.metrics('M', font_size).width as f32;
+        let font_height = font_size;
+        let font_width = font.metrics('Q', font_size).advance_width as f32;
         let cell_size = [font_width, font_height];
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -161,20 +158,22 @@ impl CellContext {
         //     data[i] = 255;
         // }
 
-        data.par_chunks_exact_mut(1024 * 1024)
+        data.chunks_exact_mut(1024 * 1024)
             .enumerate()
             .for_each(|(layer, page)| {
                 let glyph_id_base = (layer * (text_per_row * text_per_column) as usize) as u16;
                 for row_index in 0..text_per_row as usize {
-                    let index_base_row = row_index * 1024;
+                    let index_base_row = row_index * cell_height as usize * 1024;
                     let glyph_id_row = glyph_id_base + text_per_column as u16 * row_index as u16;
                     for column_index in 0..text_per_column as usize {
-                        let index_base = index_base_row + column_index * cell_width as usize;
                         let glyph_id = glyph_id_row + column_index as u16;
                         let (metric, raster) = font.rasterize_indexed(glyph_id, font_size);
-                        if metric.width == 0 {
+                        if raster.is_empty() {
                             continue;
                         }
+
+                        let index_base = index_base_row + column_index * cell_width as usize;
+
                         for (row, raster_row) in raster.chunks_exact(metric.width).enumerate() {
                             let start = index_base + row * 1024;
                             let end = start + raster_row.len();
@@ -183,6 +182,12 @@ impl CellContext {
                     }
                 }
             });
+
+        // use std::io::Write;
+        // let mut out = std::fs::File::create("foo.pgm").unwrap();
+        // write!(out, "P5\n1024 1024\n255\n").unwrap();
+        // out.write_all(&data[..1024*1024]).unwrap();
+        // out.flush().unwrap();
 
         queue.write_texture(
             wgpu::ImageCopyTexture {
