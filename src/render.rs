@@ -217,14 +217,12 @@ pub fn run(
         if need_redraw {
             let now = Instant::now();
 
-            if now < next_render_time {
-                std::thread::sleep(next_render_time - now);
+            if now >= next_render_time {
+                ctx.redraw(&local_spawner);
+                local_pool.run_until_stalled();
+                need_redraw = false;
+                next_render_time = now + FRAMETIME;
             }
-
-            ctx.redraw(&local_spawner);
-            local_pool.run_until_stalled();
-            need_redraw = false;
-            next_render_time = now + FRAMETIME;
         }
 
         if let Some(terminal) = shared_terminal.take_terminal() {
