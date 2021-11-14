@@ -10,40 +10,48 @@ struct WindowSizeUniform {
 [[group(0), binding(1)]] var font_texture: texture_2d_array<f32>;
 [[group(0), binding(2)]] var font_sampler: sampler;
 
-struct VertexInput {
+struct CellInput {
     [[builtin(vertex_index)]] vertex_index: u32;
     [[builtin(instance_index)]] cell_index: u32;
     [[location(0)]] color: vec4<f32>;
-    [[location(1)]] bg_color: vec4<f32>;
-    [[location(2)]] glyph_id: u32;
 };
 
-struct VertexOutput {
+struct CellOutput {
+    [[builtin(position)]] position: vec4<f32>;
+    [[location(0)]] color: vec4<f32>;
+};
+
+struct TextInput {
+    [[builtin(vertex_index)]] vertex_index: u32;
+    [[builtin(instance_index)]] cell_index: u32;
+    [[location(0)]] offset: vec2<f32>;
+    [[location(1)]] tex_size: vec2<f32>;
+    [[location(2)]] color: vec3<f32>;
+    [[location(3)]] glyph_id: u32;
+};
+
+struct TextOutput {
     [[builtin(position)]] position: vec4<f32>;
     [[location(0)]] tex_position: vec2<f32>;
     [[location(1)]] color: vec3<f32>;
-    [[location(2)]] bg_color: vec4<f32>;
-    [[location(3)]] layer: i32;
+    [[location(2)]] layer: i32;
 };
 
-[[stage(vertex)]]
-fn cell_vs(
-    model: VertexInput,
-) -> VertexOutput {
-    let glyph_per_layer = window_size.texture_count.x * window_size.texture_count.y;
-    let layer = i32(model.glyph_id / glyph_per_layer);
-    let left = model.glyph_id % glyph_per_layer;
+struct CellRect {
+    left: f32;
+    right: f32;
+    top: f32;
+    bottom: f32;
+};
 
-    let tex_row = left / window_size.texture_count.x;
-    let tex_column = left % window_size.texture_count.x;
+struct TexRect {
+    rect: CellRect;
+    layer: i32;
+};
 
-    let tex_top = f32(tex_row) * window_size.cell_size.y;
-    let tex_bottom = tex_top + window_size.cell_size.y;
-    let tex_left = f32(tex_column) * window_size.cell_size.x;
-    let tex_right = tex_left + window_size.cell_size.x;
-
-    let row: u32 = model.cell_index / window_size.column;
-    let column: u32 = model.cell_index % window_size.column;
+fn calculate_cell_rect(cell_index: u32) -> CellRect {
+    let row: u32 = cell_index / window_size.column;
+    let column: u32 = cell_index % window_size.column;
 
     let left = f32(column) * window_size.cell_size.x;
     let right = left + window_size.cell_size.x;
@@ -55,41 +63,76 @@ fn cell_vs(
     let top = 1.0 - top / window_size.size.y * 2.0;
     let bottom = 1.0 - bottom / window_size.size.y * 2.0;
 
-    var pos: vec2<f32>;
-    var tex_pos: vec2<f32>;
-    var color: vec3<f32> = vec3<f32>(1.0);
+    return CellRect(left, right, top, bottom);
+}
 
-    switch (model.vertex_index) {
+fn calculate_tex_rect(glyph_id: u32, tex_size: vec2<f32>) -> TexRect {
+    let glyph_per_layer = window_size.texture_count.x * window_size.texture_count.y;
+    let layer = i32(glyph_id / glyph_per_layer);
+    let left = glyph_id % glyph_per_layer;
+
+    let tex_row = left / window_size.texture_count.x;
+    let tex_column = left % window_size.texture_count.x;
+
+    let tex_top = f32(tex_row) * window_size.cell_size.y / 1024.0;
+    let tex_left = f32(tex_column) * window_size.cell_size.x / 1024.0;
+
+    let tex_size = tex_size / 1024.0;
+
+    let tex_bottom = tex_top + tex_size.y;
+    let tex_right = tex_left + tex_size.x;
+
+    return TexRect(CellRect(tex_left, tex_right, tex_top, tex_bottom), layer);
+}
+
+fn get_rect_position(rect: CellRect, vertex_index: u32) -> vec2<f32> {
+    switch (vertex_index) {
         case 0: {
-            pos = vec2<f32>(left, top);
-            tex_pos = vec2<f32>(tex_left, tex_top);
-            color = vec3<f32>(1.0, 0.0, 0.0);
+            return vec2<f32>(rect.left, rect.top);
         }
         case 1: {
-            pos = vec2<f32>(right, top);
-            tex_pos = vec2<f32>(tex_right, tex_top);
-            color = vec3<f32>(0.0, 1.0, 0.0);
+            return vec2<f32>(rect.right, rect.top);
         }
         case 2: {
-            pos = vec2<f32>(left, bottom);
-            tex_pos = vec2<f32>(tex_left, tex_bottom);
-            color = vec3<f32>(0.0, 0.0, 1.0);
+            return vec2<f32>(rect.left, rect.bottom);
         }
         default: {
-            pos = vec2<f32>(right, bottom);
-            tex_pos = vec2<f32>(tex_right, tex_bottom);
-            color = vec3<f32>(1.0, 1.0, 1.0);
+            return vec2<f32>(rect.right, rect.bottom);
         }
     }
+}
 
-    tex_pos = tex_pos / 1024.0;
-
-    return VertexOutput(vec4<f32>(pos, 1.0, 1.0), tex_pos, color, model.bg_color, layer);
+[[stage(vertex)]]
+fn cell_vs(
+    model: CellInput,
+) -> CellOutput {
+    let rect = calculate_cell_rect(model.cell_index);
+    return CellOutput(vec4<f32>(get_rect_position(rect, model.vertex_index), 1.0, 1.0), model.color);
 }
 
 [[stage(fragment)]]
-fn simple_fs(in: VertexOutput) -> [[location(0)]] vec4<f32> {
+fn cell_fs(in: CellOutput) -> [[location(0)]] vec4<f32> {
+    return in.color;
+}
+
+[[stage(vertex)]]
+fn text_vs(
+    model: TextInput,
+) -> TextOutput {
+    let rect = calculate_cell_rect(model.cell_index);
+    let tex_rect = calculate_tex_rect(model.glyph_id, model.tex_size);
+    let pos = get_rect_position(rect, model.vertex_index) + model.offset / window_size.size;
+    let tex_pos = get_rect_position(tex_rect.rect, model.vertex_index);
+    return TextOutput(vec4<f32>(pos, 1.0, 1.0), tex_pos, model.color, 0);
+}
+
+[[stage(fragment)]]
+fn text_fs(in: TextOutput) -> [[location(0)]] vec4<f32> {
+    // return vec4<f32>(in.color, 1.0);
     let alpha = textureSample(font_texture, font_sampler, in.tex_position, in.layer).r;
+    if (alpha < 0.02) {
+        discard;
+    }
     let color = vec4<f32>(in.color * alpha, alpha);
     return color;
 }

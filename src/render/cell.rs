@@ -1,7 +1,10 @@
 use std::num::NonZeroU32;
 
 use bytemuck::{Pod, Zeroable};
-use fontdue::{Font, FontSettings};
+use fontdue::{
+    layout::{CoordinateSystem, Layout, TextStyle},
+    Font, FontSettings,
+};
 use rayon::prelude::*;
 use wgpu::util::DeviceExt;
 
@@ -9,8 +12,12 @@ use super::Viewport;
 
 pub struct CellContext {
     pipeline: wgpu::RenderPipeline,
+    text_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     instances: wgpu::Buffer,
+    instance_count: usize,
+    text_instances: wgpu::Buffer,
+    text_instance_count: usize,
     window_size_buf: wgpu::Buffer,
     font: Font,
     cell_size: [f32; 2],
@@ -86,18 +93,16 @@ impl CellContext {
                 module: &shader,
                 entry_point: "cell_vs",
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<Vertex>() as _,
+                    array_stride: std::mem::size_of::<CellVertex>() as _,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
                         0 => Float32x4,
-                        1 => Float32x4,
-                        2 => Uint32,
                     ],
                 }],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "simple_fs",
+                entry_point: "cell_fs",
                 targets: &[viewport.format().into()],
             }),
             primitive: wgpu::PrimitiveState {
@@ -106,14 +111,45 @@ impl CellContext {
                 ..Default::default()
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState {
+            multisample: wgpu::MultisampleState::default(),
+        });
+
+        let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("text_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "text_vs",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<TextVertex>() as _,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x2,
+                        1 => Float32x2,
+                        2 => Float32x3,
+                        3 => Uint32,
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "text_fs",
+                targets: &[viewport.format().into()],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                front_face: wgpu::FrontFace::Cw,
                 ..Default::default()
             },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
         });
+
+        let instance_count = 20;
 
         let instances = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell Vertex Buffer"),
-            contents: bytemuck::cast_slice(&create_cell_instance(5, 10)),
+            contents: bytemuck::cast_slice(&create_cell_instance(instance_count)),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -234,13 +270,24 @@ impl CellContext {
             ],
         });
 
+        let text_instances = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("text instance buffer"),
+            mapped_at_creation: false,
+            size: (std::mem::size_of::<TextVertex>() * instance_count) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
         Self {
+            text_instances,
+            text_instance_count: 0,
             instances,
+            instance_count,
             bind_group,
             window_size_buf,
             font,
             cell_size,
             pipeline,
+            text_pipeline,
         }
     }
 
@@ -252,32 +299,64 @@ impl CellContext {
         );
     }
 
+    pub fn set_text(&mut self, queue: &wgpu::Queue, text: &str) {
+        let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
+        layout.append(
+            &[&self.font],
+            &TextStyle::new(text, super::FONT_SIZE as _, 0),
+        );
+        let vertexes = layout
+            .glyphs()
+            .iter()
+            .map(|g| dbg!(TextVertex {
+                offset: [g.x, g.y],
+                tex_size: [g.width as f32, g.height as f32],
+                color: [1.0, 1.0, 1.0],
+                glyph_id: g.key.glyph_index as u32,
+            }))
+            .collect::<Vec<_>>();
+        queue.write_buffer(&self.text_instances, 0, bytemuck::cast_slice(&vertexes));
+        self.text_instance_count = vertexes.len();
+    }
+
     pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) {
-        rpass.push_debug_group("Draw cell");
         rpass.set_bind_group(0, &self.bind_group, &[]);
+
+        rpass.push_debug_group("Draw cell");
         rpass.set_pipeline(&self.pipeline);
         rpass.set_vertex_buffer(0, self.instances.slice(..));
-        rpass.draw(0..4, 0..15);
+        rpass.draw(0..4, 0..self.instance_count as u32);
+        rpass.pop_debug_group();
+
+        rpass.push_debug_group("Draw text");
+        rpass.set_pipeline(&self.text_pipeline);
+        rpass.set_vertex_buffer(0, self.text_instances.slice(..));
+        rpass.draw(0..4, 0..self.text_instance_count as u32);
         rpass.pop_debug_group();
     }
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-struct Vertex {
+struct CellVertex {
     color: [f32; 4],
-    bg_color: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct TextVertex {
+    offset: [f32; 2],
+    tex_size: [f32; 2],
+    color: [f32; 3],
     glyph_id: u32,
 }
 
-fn create_cell_instance(column: u32, row: u32) -> Vec<Vertex> {
-    (0..(column * row))
-        .map(|e| Vertex {
-            color: [1.0, 1.0, 1.0, 1.0],
-            bg_color: [0.0, 0.0, 0.0, 1.0],
-            glyph_id: e,
-        })
-        .collect()
+fn create_cell_instance(count: usize) -> Vec<CellVertex> {
+    std::iter::repeat_with(|| CellVertex {
+        color: [0.0, 0.0, 0.0, 1.0],
+    })
+    .take(count)
+    .collect()
 }
 
 #[repr(C)]

@@ -13,7 +13,6 @@ use crossbeam_channel::Receiver;
 use futures_executor::{block_on, LocalPool, LocalSpawner};
 use futures_task::{LocalFutureObj, LocalSpawn};
 use temu_window::TemuEvent;
-use wgpu::util::DeviceExt;
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 
@@ -142,6 +141,7 @@ pub fn run(
 
     let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
     let mut ctx = WgpuContext::new(viewport, device, queue);
+    ctx.cell_ctx.set_text(&ctx.queue, "Hello, world!");
     let mut next_render_time = Instant::now();
     const FPS: u64 = 60;
     const FRAMETIME: Duration = Duration::from_millis(1000 / FPS);
