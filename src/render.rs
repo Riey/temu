@@ -1,5 +1,4 @@
 mod cell;
-mod lyon;
 mod viewport;
 
 use std::{
@@ -7,8 +6,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use self::cell::CellContext;
 pub use self::viewport::Viewport;
-use self::{cell::CellContext, lyon::LyonContext};
 use crate::term::{SharedTerminal, Terminal};
 use crossbeam_channel::Receiver;
 use futures_executor::{block_on, LocalPool, LocalSpawner};
@@ -26,10 +25,7 @@ pub struct WgpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
     cell_ctx: CellContext,
-    lyon_ctx: LyonContext,
     staging_belt: wgpu::util::StagingBelt,
-    window_size_buf: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
     scroll_state: ScrollState,
     terminal: Terminal,
     str_buf: String,
@@ -42,66 +38,10 @@ impl WgpuContext {
         scroll_state.top = 10;
         scroll_state.max = 50;
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("size_bind_group_layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let shader = device.create_shader_module(&wgpu::include_wgsl!("shaders/shader.wgsl"));
-
-        let lyon_ctx = LyonContext::new(
-            &device,
-            &shader,
-            &pipeline_layout,
-            &viewport,
-            FONT_SIZE as _,
-        );
-        let cell_size = [lyon_ctx.font_width(), lyon_ctx.font_height()];
-
-        // Create window size
-        let window_size = WindowSize {
-            size: [600.0, 400.0],
-            cell_size,
-            column: 5,
-        };
-
-        let window_size_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            contents: bytemuck::cast_slice(&[window_size]),
-            label: Some("window size buffer"),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("window size bind group"),
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(window_size_buf.as_entire_buffer_binding()),
-            }],
-        });
-
-        dbg!(cell_size);
+        let cell_ctx = CellContext::new(&device, &viewport, FONT_SIZE as f32);
 
         Self {
-            lyon_ctx,
-            cell_ctx: CellContext::new(&device, &viewport, &pipeline_layout, cell_size),
-            window_size_buf,
-            bind_group,
+            cell_ctx,
             viewport,
             staging_belt: wgpu::util::StagingBelt::new(1024),
             device,
@@ -115,11 +55,7 @@ impl WgpuContext {
     pub fn resize(&mut self, width: u32, height: u32) {
         log::info!("Resize({}, {})", width, height);
 
-        self.queue.write_buffer(
-            &self.window_size_buf,
-            0,
-            bytemuck::cast_slice(&[width as f32, height as f32]),
-        );
+        self.cell_ctx.resize(&self.queue, width, height);
         self.viewport.resize(&self.device, width, height);
         // TODO: update scroll_state
     }
@@ -151,9 +87,7 @@ impl WgpuContext {
                 depth_stencil_attachment: None,
             });
 
-            rpass.set_bind_group(0, &self.bind_group, &[]);
             self.cell_ctx.draw(&mut rpass);
-            self.lyon_ctx.draw(&mut rpass);
         }
 
         self.staging_belt.finish();
@@ -208,7 +142,6 @@ pub fn run(
 
     let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
     let mut ctx = WgpuContext::new(viewport, device, queue);
-    ctx.lyon_ctx.set_draw(&ctx.device, "Hello, world!");
     let mut next_render_time = Instant::now();
     const FPS: u64 = 60;
     const FRAMETIME: Duration = Duration::from_millis(1000 / FPS);
@@ -295,12 +228,4 @@ impl ScrollCalcResult {
         top: 0.0,
         bottom: 1.0,
     };
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct WindowSize {
-    size: [f32; 2],
-    cell_size: [f32; 2],
-    column: u32,
 }

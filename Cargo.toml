@@ -18,7 +18,6 @@ env_logger = "0.9.0"
 fps_counter = "2.0.0"
 futures-executor = "0.3.17"
 futures-task = "0.3.17"
-grid = "0.6.0"
 log = "0.4.14"
 parking_lot = "0.11.2"
 termwiz = "0.13.0"
@@ -26,9 +25,8 @@ wgpu = "0.11.0"
 
 portable-pty = "0.5.0"
 crossbeam-channel = "0.5.1"
-lyon = "0.17.10"
 rustybuzz = "0.4.0"
-ttf-parser = "0.12"
+fontdue = "0.6.2"
 
 [features]
 
