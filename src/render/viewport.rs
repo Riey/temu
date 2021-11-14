@@ -40,7 +40,7 @@ impl Viewport {
     }
 
     pub fn height(&self) -> u32 {
-        self.config.width
+        self.config.height
     }
 
     pub fn format(&self) -> wgpu::TextureFormat {

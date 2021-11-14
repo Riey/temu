@@ -18,7 +18,7 @@ use wgpu::util::DeviceExt;
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 
-const FONT_SIZE: u32 = 100;
+const FONT_SIZE: u32 = 300;
 
 #[allow(unused)]
 pub struct WgpuContext {
@@ -120,6 +120,8 @@ impl WgpuContext {
             0,
             bytemuck::cast_slice(&[width as f32, height as f32]),
         );
+        self.lyon_ctx
+            .resize(&self.device, self.viewport.format(), width, height);
         self.viewport.resize(&self.device, width, height);
         // TODO: update scroll_state
     }
@@ -153,8 +155,9 @@ impl WgpuContext {
 
             rpass.set_bind_group(0, &self.bind_group, &[]);
             self.cell_ctx.draw(&mut rpass);
-            self.lyon_ctx.draw(&mut rpass);
         }
+
+        self.lyon_ctx.draw(&mut encoder, &self.bind_group, &view);
 
         self.staging_belt.finish();
         self.queue.submit(Some(encoder.finish()));

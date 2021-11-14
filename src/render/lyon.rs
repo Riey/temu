@@ -1,15 +1,26 @@
 use bytemuck::{Pod, Zeroable};
-use lyon::{geom::{Point, Transform, Vector, euclid::Vector2D}, lyon_tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, FillVertexConstructor, VertexBuffers}, math::Size, path::path::Builder};
+use lyon::{
+    geom::{euclid::Vector2D, Point, Transform, Vector},
+    lyon_tessellation::{
+        BuffersBuilder, FillOptions, FillTessellator, FillVertex, FillVertexConstructor,
+        VertexBuffers,
+    },
+    math::Size,
+    path::path::Builder,
+};
 use rustybuzz::{Face, UnicodeBuffer};
 use wgpu::util::DeviceExt;
 
 use super::Viewport;
+
+const SAMPLE_COUNT: u32 = 4;
 
 pub struct LyonContext {
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     index_count: usize,
     pipeline: wgpu::RenderPipeline,
+    msaa_texture: wgpu::TextureView,
     face: Face<'static>,
     font_width: f32,
     font_height: f32,
@@ -57,6 +68,7 @@ impl LyonContext {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
                 ..Default::default()
             },
         });
@@ -86,7 +98,23 @@ impl LyonContext {
             face_width,
             face_height,
             buzz_buf: Some(UnicodeBuffer::new()),
+            msaa_texture: create_msaa_texture(
+                device,
+                viewport.format(),
+                viewport.width(),
+                viewport.height(),
+            ),
         }
+    }
+
+    pub fn resize(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) {
+        self.msaa_texture = create_msaa_texture(device, format, width, height);
     }
 
     pub fn font_height(&self) -> f32 {
@@ -121,19 +149,16 @@ impl LyonContext {
                 .outline_glyph(ttf_parser::GlyphId(info.glyph_id as _), &mut builder)
                 .is_some()
             {
-                let transform = Transform::translation(x + pos.x_offset as f32, y + pos.y_offset as f32).then_scale(1.0 / self.face_width, 1.0 / self.face_height);
+                let transform =
+                    Transform::translation(x + pos.x_offset as f32, y + pos.y_offset as f32)
+                        .then_scale(1.0 / self.face_width, 1.0 / self.face_height);
                 let path = builder.builder.build().transformed(&transform);
                 tess.tessellate_path(
                     &path,
                     &FillOptions::default(),
-                    &mut BuffersBuilder::new(
-                        &mut mesh,
-                        |v: FillVertex| {
-                            LyonVertex {
-                                position: v.position().to_array(),
-                            }
-                        },
-                    ),
+                    &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
+                        position: v.position().to_array(),
+                    }),
                 )
                 .unwrap();
             }
@@ -166,11 +191,30 @@ impl LyonContext {
         );
     }
 
-    pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) {
+    pub fn draw(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        bind_group: &wgpu::BindGroup,
+        view: &wgpu::TextureView,
+    ) {
         if self.index_count == 0 {
             return;
         }
 
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[wgpu::RenderPassColorAttachment {
+                view: &self.msaa_texture,
+                resolve_target: Some(view),
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: true,
+                },
+            }],
+            depth_stencil_attachment: None,
+        });
+
+        rpass.set_bind_group(0, bind_group, &[]);
         rpass.set_pipeline(&self.pipeline);
         rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
         rpass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
@@ -222,4 +266,28 @@ impl FillVertexConstructor<LyonVertex> for VertexCtor {
             position: vertex.position().to_array(),
         }
     }
+}
+
+fn create_msaa_texture(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+) -> wgpu::TextureView {
+    dbg!(width, height);
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("msaa"),
+            format,
+            dimension: wgpu::TextureDimension::D2,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: SAMPLE_COUNT,
+        })
+        .create_view(&wgpu::TextureViewDescriptor::default())
 }
