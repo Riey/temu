@@ -13,7 +13,6 @@ impl CellContext {
         device: &wgpu::Device,
         viewport: &Viewport,
         pipeline_layout: &wgpu::PipelineLayout,
-        cell_size: [f32; 2],
     ) -> Self {
         let shader = device.create_shader_module(&wgpu::include_wgsl!("../shaders/shader.wgsl"));
 

@@ -99,7 +99,7 @@ impl WgpuContext {
 
         Self {
             lyon_ctx,
-            cell_ctx: CellContext::new(&device, &viewport, &pipeline_layout, cell_size),
+            cell_ctx: CellContext::new(&device, &viewport, &pipeline_layout),
             window_size_buf,
             bind_group,
             viewport,
