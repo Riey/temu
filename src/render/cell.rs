@@ -308,12 +308,14 @@ impl CellContext {
         let vertexes = layout
             .glyphs()
             .iter()
-            .map(|g| dbg!(TextVertex {
-                offset: [g.x, g.y],
-                tex_size: [g.width as f32, g.height as f32],
-                color: [1.0, 1.0, 1.0],
-                glyph_id: g.key.glyph_index as u32,
-            }))
+            .map(|g| {
+                dbg!(TextVertex {
+                    offset: [g.x, g.y],
+                    tex_size: [g.width as f32, g.height as f32],
+                    color: [1.0, 1.0, 1.0],
+                    glyph_id: g.key.glyph_index as u32,
+                })
+            })
             .collect::<Vec<_>>();
         queue.write_buffer(&self.text_instances, 0, bytemuck::cast_slice(&vertexes));
         self.text_instance_count = vertexes.len();
