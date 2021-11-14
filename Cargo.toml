@@ -27,6 +27,7 @@ portable-pty = "0.5.0"
 crossbeam-channel = "0.5.1"
 rustybuzz = "0.4.0"
 fontdue = "0.6.2"
+rayon = "1.5.1"
 
 [features]
 

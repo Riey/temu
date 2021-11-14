@@ -22,9 +22,9 @@ fn main() {
         render::run(instance, surface, event_rx, shared_inner);
     });
 
-    std::thread::spawn(move || {
-        term::run(event_tx, pty_event_rx, shared);
-    });
+    // std::thread::spawn(move || {
+    //     term::run(event_tx, pty_event_rx, shared);
+    // });
 
     log::info!("Start window");
     window.run();

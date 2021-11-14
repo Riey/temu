@@ -38,7 +38,7 @@ impl WgpuContext {
         scroll_state.top = 10;
         scroll_state.max = 50;
 
-        let cell_ctx = CellContext::new(&device, &viewport, FONT_SIZE as f32);
+        let cell_ctx = CellContext::new(&device, &queue, &viewport, FONT_SIZE as f32);
 
         Self {
             cell_ctx,
@@ -131,7 +131,7 @@ pub fn run(
     let (device, queue) = block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
             label: None,
-            features: wgpu::Features::empty(),
+            features: wgpu::Features::TEXTURE_BINDING_ARRAY | wgpu::Features::UNSIZED_BINDING_ARRAY,
             limits: wgpu::Limits::downlevel_defaults(),
         },
         None,
