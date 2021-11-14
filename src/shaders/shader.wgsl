@@ -63,24 +63,26 @@ fn cell_vs(
         case 0: {
             pos = vec2<f32>(left, top);
             tex_pos = vec2<f32>(tex_left, tex_top);
-            // color = vec3<f32>(1.0, 0.0, 0.0);
+            color = vec3<f32>(1.0, 0.0, 0.0);
         }
         case 1: {
             pos = vec2<f32>(right, top);
             tex_pos = vec2<f32>(tex_right, tex_top);
-            // color = vec3<f32>(0.0, 1.0, 0.0);
+            color = vec3<f32>(0.0, 1.0, 0.0);
         }
         case 2: {
             pos = vec2<f32>(left, bottom);
             tex_pos = vec2<f32>(tex_left, tex_bottom);
-            // color = vec3<f32>(0.0, 0.0, 1.0);
+            color = vec3<f32>(0.0, 0.0, 1.0);
         }
         default: {
             pos = vec2<f32>(right, bottom);
             tex_pos = vec2<f32>(tex_right, tex_bottom);
-            // color = vec3<f32>(1.0, 1.0, 1.0);
+            color = vec3<f32>(1.0, 1.0, 1.0);
         }
     }
+
+    tex_pos = tex_pos / 1024.0;
 
     return VertexOutput(vec4<f32>(pos, 1.0, 1.0), tex_pos, color, model.bg_color, layer);
 }
@@ -88,9 +90,6 @@ fn cell_vs(
 [[stage(fragment)]]
 fn simple_fs(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     let alpha = textureSample(font_texture, font_sampler, in.tex_position, in.layer).r;
-    if (alpha < 0.02) {
-        return in.bg_color;
-    }
-    let color = vec4<f32>(in.color, alpha);
+    let color = vec4<f32>(alpha);
     return color;
 }

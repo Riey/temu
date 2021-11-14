@@ -120,22 +120,23 @@ impl CellContext {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
+        let cell_width = cell_size[0] as u32;
+        let cell_height = cell_size[1] as u32;
+        let text_per_column = 1024 / cell_width;
+        let text_per_row = 1024 / cell_height;
+        let layer_count = (font.glyph_count() as u32 / (text_per_row * text_per_column)).max(2);
+
         let window_size = WindowSize {
             size: [viewport.width() as f32, viewport.height() as f32],
-            texture_count: [1024, 1024],
+            texture_count: [text_per_column, text_per_row],
             cell_size,
             column: 5,
         };
-
         let window_size_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             contents: bytemuck::cast_slice(&[window_size]),
             label: Some("window size buffer"),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-
-        let text_per_row = 1024 / cell_size[0] as u32;
-        let text_per_column = 1024 / cell_size[1] as u32;
-        let layer_count = font.glyph_count() as u32 / (text_per_column * text_per_row);
 
         let texture_size = wgpu::Extent3d {
             width: 1024,
@@ -154,6 +155,35 @@ impl CellContext {
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        let mut data = vec![0u8; 1024 * 1024 * layer_count as usize];
+
+        // for i in 0..1024 * 20 {
+        //     data[i] = 255;
+        // }
+
+        data.par_chunks_exact_mut(1024 * 1024)
+            .enumerate()
+            .for_each(|(layer, page)| {
+                let glyph_id_base = (layer * (text_per_row * text_per_column) as usize) as u16;
+                for row_index in 0..text_per_row as usize {
+                    let index_base_row = row_index * 1024;
+                    let glyph_id_row = glyph_id_base + text_per_column as u16 * row_index as u16;
+                    for column_index in 0..text_per_column as usize {
+                        let index_base = index_base_row + column_index * cell_width as usize;
+                        let glyph_id = glyph_id_row + column_index as u16;
+                        let (metric, raster) = font.rasterize_indexed(glyph_id, font_size);
+                        if metric.width == 0 {
+                            continue;
+                        }
+                        for (row, raster_row) in raster.chunks_exact(metric.width).enumerate() {
+                            let start = index_base + row * 1024;
+                            let end = start + raster_row.len();
+                            page[start..end].copy_from_slice(raster_row);
+                        }
+                    }
+                }
+            });
+
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 aspect: wgpu::TextureAspect::All,
@@ -161,7 +191,7 @@ impl CellContext {
                 origin: wgpu::Origin3d::ZERO,
                 texture: &texture,
             },
-            &vec![200; 1024 * 1024 * layer_count as usize],
+            &data,
             wgpu::ImageDataLayout {
                 bytes_per_row: NonZeroU32::new(1024),
                 rows_per_image: NonZeroU32::new(1024),
@@ -174,7 +204,7 @@ impl CellContext {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
@@ -237,10 +267,10 @@ struct Vertex {
 
 fn create_cell_instance(column: u32, row: u32) -> Vec<Vertex> {
     (0..(column * row))
-        .map(|_| Vertex {
+        .map(|e| Vertex {
             color: [1.0, 1.0, 1.0, 1.0],
             bg_color: [0.0, 0.0, 0.0, 1.0],
-            glyph_id: 0,
+            glyph_id: e,
         })
         .collect()
 }
