@@ -31,15 +31,6 @@ impl crate::TemuWindow for WinitWindow {
             .build(&event_loop)
             .unwrap();
 
-        let factor = inner.scale_factor();
-
-        event_tx
-            .send(TemuEvent::Resize {
-                width: (600.0 * factor) as u32,
-                height: (400.0 * factor) as u32,
-            })
-            .unwrap();
-
         Self {
             inner,
             event_loop,
@@ -48,9 +39,18 @@ impl crate::TemuWindow for WinitWindow {
         }
     }
 
+    fn size(&self) -> (u32, u32) {
+        let size = self.inner.inner_size();
+        (size.width, size.height)
+    }
+
+    fn scale_factor(&self) -> f32 {
+        self.inner.scale_factor() as f32
+    }
+
     fn run(self) {
         let Self {
-            inner,
+            inner: _,
             event_loop,
             pty_event_tx,
             event_tx,

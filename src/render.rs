@@ -16,7 +16,7 @@ use temu_window::TemuEvent;
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 
-const FONT_SIZE: u32 = 100;
+const FONT_SIZE: f32 = 15.0;
 
 #[allow(unused)]
 pub struct WgpuContext {
@@ -30,13 +30,18 @@ pub struct WgpuContext {
 }
 
 impl WgpuContext {
-    pub fn new(viewport: Viewport, device: wgpu::Device, queue: wgpu::Queue) -> Self {
+    pub fn new(
+        viewport: Viewport,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        scale_factor: f32,
+    ) -> Self {
         let mut scroll_state = ScrollState::new();
         scroll_state.page_size = 20;
         scroll_state.top = 10;
         scroll_state.max = 50;
 
-        let cell_ctx = CellContext::new(&device, &queue, &viewport, FONT_SIZE as f32);
+        let cell_ctx = CellContext::new(&device, &queue, &viewport, FONT_SIZE * scale_factor);
 
         Self {
             cell_ctx,
@@ -96,21 +101,12 @@ impl WgpuContext {
     }
 }
 
-fn wait_size(event_rx: &Receiver<TemuEvent>) -> (u32, u32) {
-    loop {
-        let e = event_rx.recv().unwrap();
-        match e {
-            TemuEvent::Resize { width, height } => {
-                return (width, height);
-            }
-            _ => {}
-        }
-    }
-}
-
 pub fn run(
     instance: wgpu::Instance,
     surface: wgpu::Surface,
+    width: u32,
+    height: u32,
+    scale_factor: f32,
     event_rx: Receiver<TemuEvent>,
     shared_terminal: Arc<SharedTerminal>,
 ) {
@@ -135,12 +131,12 @@ pub fn run(
     ))
     .expect("Failed to create device");
 
-    let mut prev_resize = wait_size(&event_rx);
+    let mut prev_resize = (width, height);
 
     let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
-    let mut ctx = WgpuContext::new(viewport, device, queue);
+    let mut ctx = WgpuContext::new(viewport, device, queue, scale_factor);
     let mut next_render_time = Instant::now();
-    const FPS: u64 = 60;
+    const FPS: u64 = 120;
     const FRAMETIME: Duration = Duration::from_millis(1000 / FPS);
 
     loop {

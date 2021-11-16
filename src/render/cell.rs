@@ -25,7 +25,7 @@ pub struct CellContext {
     text_instance_count: usize,
     window_size_buf: wgpu::Buffer,
     font: Font,
-    cell_size: [f32; 2],
+    font_size: f32,
 }
 
 impl CellContext {
@@ -44,9 +44,8 @@ impl CellContext {
         )
         .unwrap();
 
-        let font_height = font_size;
         let font_width = font.metrics('M', font_size).advance_width.ceil();
-        let cell_size = [font_width, font_height];
+        let cell_size = [font_width, font_size];
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("size_bind_group_layout"),
@@ -299,7 +298,7 @@ impl CellContext {
             bind_group,
             window_size_buf,
             font,
-            cell_size,
+            font_size,
             pipeline,
             text_pipeline,
         }
@@ -321,7 +320,7 @@ impl CellContext {
             line.write_text(&mut t);
             t.push('\n');
 
-            layout.append(&[&self.font], &TextStyle::new(&t, super::FONT_SIZE as _, 0));
+            layout.append(&[&self.font], &TextStyle::new(&t, self.font_size, 0));
 
             t.clear();
         }

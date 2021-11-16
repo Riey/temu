@@ -8,6 +8,8 @@ use crossbeam_channel::Sender;
 
 pub trait TemuWindow: raw_window_handle::HasRawWindowHandle {
     fn init(event_tx: Sender<event::TemuEvent>, pty_event_tx: Sender<TemuPtyEvent>) -> Self;
+    fn size(&self) -> (u32, u32);
+    fn scale_factor(&self) -> f32;
     fn run(self);
 }
 
