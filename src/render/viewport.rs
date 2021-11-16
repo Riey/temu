@@ -11,14 +11,17 @@ impl Viewport {
         device: &wgpu::Device,
         surface: wgpu::Surface,
     ) -> Self {
+        debug_assert!(width > 0);
+        debug_assert!(height > 0);
+
         let render_format = surface
             .get_preferred_format(adapter)
             .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: render_format,
-            width: width.max(300),
-            height: height.max(200),
+            width: width,
+            height: height,
             present_mode: wgpu::PresentMode::Mailbox,
         };
 
@@ -48,8 +51,11 @@ impl Viewport {
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        self.config.width = width.max(300);
-        self.config.height = height.max(200);
+        debug_assert!(width > 0);
+        debug_assert!(height > 0);
+
+        self.config.width = width;
+        self.config.height = height;
         self.surface.configure(device, &self.config);
     }
 

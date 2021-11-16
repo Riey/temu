@@ -34,6 +34,7 @@ pub struct WgpuContext {
     terminal: Terminal,
     str_buf: String,
     msaa: wgpu::TextureView,
+    next_resize: Option<(u32, u32)>,
 }
 
 impl WgpuContext {
@@ -111,6 +112,7 @@ impl WgpuContext {
             staging_belt: wgpu::util::StagingBelt::new(1024),
             device,
             queue,
+            next_resize: None,
             scroll_state,
             terminal: Terminal::new(100),
             str_buf: String::new(),
@@ -118,27 +120,29 @@ impl WgpuContext {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-        log::info!("Resize({}, {})", width, height);
-
-        self.msaa = create_msaa_texture(&self.device, self.viewport.format(), width, height);
-        self.queue.write_buffer(
-            &self.window_size_buf,
-            0,
-            bytemuck::cast_slice(&[width as f32, height as f32]),
-        );
-        self.viewport.resize(&self.device, width, height);
         // TODO: update scroll_state
+
+        // lazy update
+        self.next_resize = Some((width, height));
     }
 
     pub fn redraw(&mut self, spawner: &LocalSpawner) {
+        if let Some((width, height)) = self.next_resize.take() {
+            self.msaa = create_msaa_texture(&self.device, self.viewport.format(), width, height);
+            self.queue.write_buffer(
+                &self.window_size_buf,
+                0,
+                bytemuck::cast_slice(&[width as f32, height as f32]),
+            );
+            self.viewport.resize(&self.device, width, height);
+        }
+
         let frame = match self.viewport.get_current_texture() {
             Some(frame) => frame,
             None => return,
         };
 
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
-            ..Default::default()
-        });
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder = self
             .device
@@ -204,7 +208,7 @@ pub fn run(
         &wgpu::DeviceDescriptor {
             label: None,
             features: wgpu::Features::empty(),
-            limits: wgpu::Limits::downlevel_defaults(),
+            limits: wgpu::Limits::default(),
         },
         None,
     ))
