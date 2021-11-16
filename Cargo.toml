@@ -22,7 +22,7 @@ grid = "0.6.0"
 log = "0.4.14"
 parking_lot = "0.11.2"
 termwiz = "0.13.0"
-wgpu = "0.11.0"
+wgpu = { version = "0.11.0", features = ["spirv"] }
 
 portable-pty = "0.5.0"
 crossbeam-channel = "0.5.1"

@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
+use wgpu::util::{DeviceExt, RenderEncoder};
 
 use super::Viewport;
 
@@ -43,6 +43,7 @@ impl CellContext {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
+                count: super::SAMPLE_COUNT,
                 ..Default::default()
             },
         });
@@ -59,12 +60,10 @@ impl CellContext {
         }
     }
 
-    pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) {
-        rpass.push_debug_group("Draw cell");
+    pub fn draw<'a>(&'a self, rpass: &mut impl RenderEncoder<'a>) {
         rpass.set_pipeline(&self.pipeline);
         rpass.set_vertex_buffer(0, self.instances.slice(..));
         rpass.draw(0..4, 0..15);
-        rpass.pop_debug_group();
     }
 }
 

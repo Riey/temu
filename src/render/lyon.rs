@@ -9,7 +9,7 @@ use lyon::{
     path::path::Builder,
 };
 use rustybuzz::{Face, UnicodeBuffer};
-use wgpu::util::DeviceExt;
+use wgpu::util::{DeviceExt, RenderEncoder};
 
 use super::Viewport;
 
@@ -61,7 +61,11 @@ impl LyonContext {
             fragment: Some(wgpu::FragmentState {
                 module: shader,
                 entry_point: "simple_fs",
-                targets: &[viewport.format().into()],
+                targets: &[wgpu::ColorTargetState {
+                    format: viewport.format(),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                }],
             }),
             primitive: wgpu::PrimitiveState {
                 ..Default::default()
@@ -69,6 +73,7 @@ impl LyonContext {
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
                 count: SAMPLE_COUNT,
+                alpha_to_coverage_enabled: true,
                 ..Default::default()
             },
         });
@@ -155,7 +160,7 @@ impl LyonContext {
                 let path = builder.builder.build().transformed(&transform);
                 tess.tessellate_path(
                     &path,
-                    &FillOptions::default(),
+                    &FillOptions::default().with_tolerance(0.001),
                     &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
                         position: v.position().to_array(),
                     }),
@@ -191,30 +196,11 @@ impl LyonContext {
         );
     }
 
-    pub fn draw(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        bind_group: &wgpu::BindGroup,
-        view: &wgpu::TextureView,
-    ) {
+    pub fn draw<'a>(&'a self, rpass: &mut impl RenderEncoder<'a>) {
         if self.index_count == 0 {
             return;
         }
 
-        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[wgpu::RenderPassColorAttachment {
-                view: &self.msaa_texture,
-                resolve_target: Some(view),
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: true,
-                },
-            }],
-            depth_stencil_attachment: None,
-        });
-
-        rpass.set_bind_group(0, bind_group, &[]);
         rpass.set_pipeline(&self.pipeline);
         rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
         rpass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);

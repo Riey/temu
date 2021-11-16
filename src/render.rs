@@ -17,7 +17,7 @@ use temu_window::TemuEvent;
 use wgpu::util::DeviceExt;
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
-
+const SAMPLE_COUNT: u32 = 4;
 const FONT_SIZE: u32 = 300;
 
 #[allow(unused)]
@@ -33,6 +33,7 @@ pub struct WgpuContext {
     scroll_state: ScrollState,
     terminal: Terminal,
     str_buf: String,
+    msaa: wgpu::TextureView,
 }
 
 impl WgpuContext {
@@ -95,9 +96,13 @@ impl WgpuContext {
             }],
         });
 
-        dbg!(cell_size);
-
         Self {
+            msaa: create_msaa_texture(
+                &device,
+                viewport.format(),
+                viewport.width(),
+                viewport.height(),
+            ),
             lyon_ctx,
             cell_ctx: CellContext::new(&device, &viewport, &pipeline_layout),
             window_size_buf,
@@ -143,8 +148,8 @@ impl WgpuContext {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("background"),
                 color_attachments: &[wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
+                    view: &self.msaa,
+                    resolve_target: Some(&view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
                         store: true,
@@ -155,9 +160,8 @@ impl WgpuContext {
 
             rpass.set_bind_group(0, &self.bind_group, &[]);
             self.cell_ctx.draw(&mut rpass);
+            self.lyon_ctx.draw(&mut rpass);
         }
-
-        self.lyon_ctx.draw(&mut encoder, &self.bind_group, &view);
 
         self.staging_belt.finish();
         self.queue.submit(Some(encoder.finish()));
@@ -309,4 +313,27 @@ pub struct WindowSize {
     size: [f32; 2],
     cell_size: [f32; 2],
     column: u32,
+}
+
+fn create_msaa_texture(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+) -> wgpu::TextureView {
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("msaa"),
+            format,
+            dimension: wgpu::TextureDimension::D2,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: SAMPLE_COUNT,
+        })
+        .create_view(&wgpu::TextureViewDescriptor::default())
 }
