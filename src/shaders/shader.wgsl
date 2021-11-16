@@ -142,9 +142,9 @@ fn text_vs(
 fn text_fs(in: TextOutput) -> [[location(0)]] vec4<f32> {
     // return vec4<f32>(in.color, 1.0);
     let alpha = textureSample(font_texture, font_sampler, in.tex_position, in.layer).r;
-    if (alpha < 0.02) {
-        discard;
-    }
-    let color = vec4<f32>(in.color * alpha, alpha);
+    // if (alpha < 0.02) {
+    //     discard;
+    // }
+    let color = vec4<f32>(in.color, alpha);
     return color;
 }

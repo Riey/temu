@@ -137,7 +137,11 @@ impl CellContext {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "text_fs",
-                targets: &[viewport.format().into()],
+                targets: &[wgpu::ColorTargetState {
+                    format: viewport.format(),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                }],
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
