@@ -1,5 +1,3 @@
-use grid::Grid;
-use std::iter;
 use termwiz::escape::{
     csi::{Cursor, Edit, EraseInDisplay, EraseInLine},
     Action, ControlCode, OneBased, CSI,

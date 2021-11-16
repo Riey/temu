@@ -16,12 +16,12 @@ impl Viewport {
 
         let render_format = surface
             .get_preferred_format(adapter)
-            .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+            .unwrap_or(wgpu::TextureFormat::Rgba8UnormSrgb);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: render_format,
-            width: width,
-            height: height,
+            width,
+            height,
             present_mode: wgpu::PresentMode::Mailbox,
         };
 

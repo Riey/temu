@@ -18,7 +18,7 @@ use wgpu::util::DeviceExt;
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 const SAMPLE_COUNT: u32 = 4;
-const FONT_SIZE: u32 = 300;
+const FONT_SIZE: u32 = 100;
 
 #[allow(unused)]
 pub struct WgpuContext {
@@ -128,13 +128,13 @@ impl WgpuContext {
 
     pub fn redraw(&mut self, spawner: &LocalSpawner) {
         if let Some((width, height)) = self.next_resize.take() {
+            self.viewport.resize(&self.device, width, height);
             self.msaa = create_msaa_texture(&self.device, self.viewport.format(), width, height);
             self.queue.write_buffer(
                 &self.window_size_buf,
                 0,
                 bytemuck::cast_slice(&[width as f32, height as f32]),
             );
-            self.viewport.resize(&self.device, width, height);
         }
 
         let frame = match self.viewport.get_current_texture() {
@@ -142,7 +142,9 @@ impl WgpuContext {
             None => return,
         };
 
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder = self
             .device

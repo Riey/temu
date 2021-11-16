@@ -91,7 +91,7 @@ struct LyonOutput {
 
 [[stage(vertex)]]
 fn lyon_vs(model: LyonInput) -> VertexOutput {
-    let scale = window_size.cell_size / window_size.size;
+    let scale = window_size.cell_size.yy * 2.0 / window_size.size;
     // let position = model.position;
     var position = model.position * scale + vec2<f32>(-1.0, 1.0 - scale.y);
     // position.x = position.x * 2.0 - 1.0;

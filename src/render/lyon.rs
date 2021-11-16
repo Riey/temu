@@ -1,10 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use lyon::{
     geom::{Point, Transform},
-    lyon_tessellation::{
-        BuffersBuilder, FillOptions, FillTessellator, FillVertex, FillVertexConstructor,
-        VertexBuffers,
-    },
+    lyon_tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers},
     math::Size,
     path::path::Builder,
 };
@@ -23,9 +20,6 @@ pub struct LyonContext {
     face: Face<'static>,
     font_width: f32,
     font_height: f32,
-    face_width: f32,
-    /// real height for face
-    face_height: f32,
     buzz_buf: Option<UnicodeBuffer>,
 }
 
@@ -38,10 +32,10 @@ impl LyonContext {
         font_height: f32,
     ) -> Self {
         let face = Face::from_slice(super::FONT, 0).unwrap();
-
-        let face_height = face.global_bounding_box().height() as f32;
-        let face_width = face.global_bounding_box().width() as f32;
-        let font_width = face_width / face_height * font_height;
+        let m = face.glyph_index('M').unwrap();
+        let h_advance = face.glyph_hor_advance(m).unwrap();
+        let face_width = h_advance as f32;
+        let font_width = face_width / face.units_per_em() as f32 * font_height;
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("lyon_pipeline"),
@@ -99,8 +93,6 @@ impl LyonContext {
             pipeline,
             font_height,
             font_width,
-            face_width,
-            face_height,
             buzz_buf: Some(UnicodeBuffer::new()),
         }
     }
@@ -122,6 +114,7 @@ impl LyonContext {
         let positions = glyph_buf.glyph_positions();
         let infos = glyph_buf.glyph_infos();
 
+        let scale = 1.0 / self.face.units_per_em() as f32;
         let mut x = 0.0;
         let mut y = 0.0;
 
@@ -139,7 +132,7 @@ impl LyonContext {
             {
                 let transform =
                     Transform::translation(x + pos.x_offset as f32, y + pos.y_offset as f32)
-                        .then_scale(1.0 / self.face_width, 1.0 / self.face_height);
+                        .then_scale(scale, scale);
                 let path = builder.builder.build().transformed(&transform);
                 tess.tessellate_path(
                     &path,
@@ -223,16 +216,4 @@ impl ttf_parser::OutlineBuilder for LyonBuilder {
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct LyonVertex {
     position: [f32; 2],
-}
-
-struct VertexCtor {
-    base: Size,
-}
-
-impl FillVertexConstructor<LyonVertex> for VertexCtor {
-    fn new_vertex(&mut self, vertex: lyon::lyon_tessellation::FillVertex) -> LyonVertex {
-        LyonVertex {
-            position: vertex.position().to_array(),
-        }
-    }
 }
