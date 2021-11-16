@@ -10,6 +10,9 @@ use wgpu::util::DeviceExt;
 
 use super::Viewport;
 
+const TEXTURE_WIDTH: u32 = 2048;
+const TEXTURE_SIZE: usize = (TEXTURE_WIDTH * TEXTURE_WIDTH) as usize;
+
 pub struct CellContext {
     pipeline: wgpu::RenderPipeline,
     text_pipeline: wgpu::RenderPipeline,
@@ -155,8 +158,8 @@ impl CellContext {
 
         let cell_width = cell_size[0] as u32;
         let cell_height = cell_size[1] as u32;
-        let text_per_column = 1024 / cell_width;
-        let text_per_row = 1024 / cell_height;
+        let text_per_column = TEXTURE_WIDTH / cell_width;
+        let text_per_row = TEXTURE_WIDTH / cell_height;
         let layer_count = (font.glyph_count() as u32 / (text_per_row * text_per_column)).max(2);
 
         let window_size = WindowSize {
@@ -172,8 +175,8 @@ impl CellContext {
         });
 
         let texture_size = wgpu::Extent3d {
-            width: 1024,
-            height: 1024,
+            width: TEXTURE_WIDTH,
+            height: TEXTURE_WIDTH,
             depth_or_array_layers: layer_count,
         };
 
@@ -188,18 +191,18 @@ impl CellContext {
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut data = vec![0u8; 1024 * 1024 * layer_count as usize];
+        let mut data = vec![0u8; TEXTURE_SIZE * layer_count as usize];
 
         // for i in 0..1024 * 20 {
         //     data[i] = 255;
         // }
 
-        data.chunks_exact_mut(1024 * 1024)
+        data.chunks_exact_mut(TEXTURE_SIZE)
             .enumerate()
             .for_each(|(layer, page)| {
                 let glyph_id_base = (layer * (text_per_row * text_per_column) as usize) as u16;
                 for row_index in 0..text_per_row as usize {
-                    let index_base_row = row_index * cell_height as usize * 1024;
+                    let index_base_row = row_index * cell_height as usize * TEXTURE_WIDTH as usize;
                     let glyph_id_row = glyph_id_base + text_per_column as u16 * row_index as u16;
                     for column_index in 0..text_per_column as usize {
                         let glyph_id = glyph_id_row + column_index as u16;
@@ -211,7 +214,7 @@ impl CellContext {
                         let index_base = index_base_row + column_index * cell_width as usize;
 
                         for (row, raster_row) in raster.chunks_exact(metric.width).enumerate() {
-                            let start = index_base + row * 1024;
+                            let start = index_base + row * TEXTURE_WIDTH as usize;
                             let end = start + raster_row.len();
                             page[start..end].copy_from_slice(raster_row);
                         }
@@ -234,8 +237,8 @@ impl CellContext {
             },
             &data,
             wgpu::ImageDataLayout {
-                bytes_per_row: NonZeroU32::new(1024),
-                rows_per_image: NonZeroU32::new(1024),
+                bytes_per_row: NonZeroU32::new(TEXTURE_WIDTH),
+                rows_per_image: NonZeroU32::new(TEXTURE_WIDTH),
                 offset: 0,
             },
             texture_size,

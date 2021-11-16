@@ -10,6 +10,8 @@ struct WindowSizeUniform {
 [[group(0), binding(1)]] var font_texture: texture_2d_array<f32>;
 [[group(0), binding(2)]] var font_sampler: sampler;
 
+let TEXTURE_WIDTH: f32 = 2048.0;
+
 struct CellInput {
     [[builtin(vertex_index)]] vertex_index: u32;
     [[builtin(instance_index)]] cell_index: u32;
@@ -37,33 +39,24 @@ struct TextOutput {
     [[location(2)]] layer: i32;
 };
 
-struct CellRect {
-    left: f32;
-    right: f32;
-    top: f32;
-    bottom: f32;
+struct Rect {
+    begin: vec2<f32>;
+    size: vec2<f32>;
 };
 
 struct TexRect {
-    rect: CellRect;
+    rect: Rect;
     layer: i32;
 };
 
-fn calculate_cell_rect(cell_index: u32) -> CellRect {
+fn calculate_cell_rect(cell_index: u32) -> Rect {
     let row: u32 = cell_index / window_size.column;
     let column: u32 = cell_index % window_size.column;
 
-    let left = f32(column) * window_size.cell_size.x;
-    let right = left + window_size.cell_size.x;
-    let top = f32(row) * window_size.cell_size.y;
-    let bottom = top + window_size.cell_size.y;
+    let size = window_size.cell_size * 2.0 / window_size.size;
+    let begin = vec2<f32>(f32(column), f32(row)) * size;
 
-    let left = left / window_size.size.x * 2.0 - 1.0;
-    let right = right / window_size.size.x * 2.0 - 1.0;
-    let top = 1.0 - top / window_size.size.y * 2.0;
-    let bottom = 1.0 - bottom / window_size.size.y * 2.0;
-
-    return CellRect(left, right, top, bottom);
+    return Rect(begin, size);
 }
 
 fn calculate_tex_rect(glyph_id: u32, tex_size: vec2<f32>) -> TexRect {
@@ -71,35 +64,54 @@ fn calculate_tex_rect(glyph_id: u32, tex_size: vec2<f32>) -> TexRect {
     let layer = i32(glyph_id / glyph_per_layer);
     let left = glyph_id % glyph_per_layer;
 
-    let tex_row = left / window_size.texture_count.x;
-    let tex_column = left % window_size.texture_count.x;
+    let row = left / window_size.texture_count.x;
+    let column = left % window_size.texture_count.x;
 
-    let tex_top = f32(tex_row) * window_size.cell_size.y / 1024.0;
-    let tex_left = f32(tex_column) * window_size.cell_size.x / 1024.0;
+    let begin = vec2<f32>(f32(column), f32(row)) * window_size.cell_size / TEXTURE_WIDTH;
+    let size = tex_size / TEXTURE_WIDTH;
 
-    let tex_size = tex_size / 1024.0;
-
-    let tex_bottom = tex_top + tex_size.y;
-    let tex_right = tex_left + tex_size.x;
-
-    return TexRect(CellRect(tex_left, tex_right, tex_top, tex_bottom), layer);
+    return TexRect(Rect(begin, size), layer);
 }
 
-fn get_rect_position(rect: CellRect, vertex_index: u32) -> vec2<f32> {
+fn get_cell_rect_position(rect: Rect, vertex_index: u32) -> vec2<f32> {
+    var ret = rect.begin;
+
     switch (vertex_index) {
         case 0: {
-            return vec2<f32>(rect.left, rect.top);
         }
         case 1: {
-            return vec2<f32>(rect.right, rect.top);
+            ret.x = ret.x + rect.size.x;
         }
         case 2: {
-            return vec2<f32>(rect.left, rect.bottom);
+            ret.y = ret.y - rect.size.y;
         }
         default: {
-            return vec2<f32>(rect.right, rect.bottom);
+            ret.x = ret.x + rect.size.x;
+            ret.y = ret.y - rect.size.y;
         }
     }
+
+    return ret;
+}
+
+fn get_tex_rect_position(rect: Rect, vertex_index: u32) -> vec2<f32> {
+    var ret = rect.begin;
+
+    switch (vertex_index) {
+        case 0: {
+        }
+        case 1: {
+            ret.x = ret.x + rect.size.x;
+        }
+        case 2: {
+            ret.y = ret.y + rect.size.y;
+        }
+        default: {
+            ret = ret + rect.size;
+        }
+    }
+
+    return ret;
 }
 
 [[stage(vertex)]]
@@ -107,7 +119,7 @@ fn cell_vs(
     model: CellInput,
 ) -> CellOutput {
     let rect = calculate_cell_rect(model.cell_index);
-    return CellOutput(vec4<f32>(get_rect_position(rect, model.vertex_index), 1.0, 1.0), model.color);
+    return CellOutput(vec4<f32>(get_cell_rect_position(rect, model.vertex_index), 1.0, 1.0), model.color);
 }
 
 [[stage(fragment)]]
@@ -121,9 +133,9 @@ fn text_vs(
 ) -> TextOutput {
     let rect = calculate_cell_rect(model.cell_index);
     let tex_rect = calculate_tex_rect(model.glyph_id, model.tex_size);
-    let pos = get_rect_position(rect, model.vertex_index) + model.offset / window_size.size;
-    let tex_pos = get_rect_position(tex_rect.rect, model.vertex_index);
-    return TextOutput(vec4<f32>(pos, 1.0, 1.0), tex_pos, model.color, 0);
+    let pos = get_cell_rect_position(rect, model.vertex_index);
+    let tex_pos = get_tex_rect_position(tex_rect.rect, model.vertex_index);
+    return TextOutput(vec4<f32>(pos, 1.0, 1.0), tex_pos, model.color, tex_rect.layer);
 }
 
 [[stage(fragment)]]
