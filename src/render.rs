@@ -128,6 +128,8 @@ impl WgpuContext {
     }
 
     pub fn redraw(&mut self) {
+        let start = Instant::now();
+
         if let Some((width, height)) = self.next_resize.take() {
             self.viewport.resize(&self.device, width, height);
             self.msaa = create_msaa_texture(&self.device, self.viewport.format(), width, height);
@@ -171,6 +173,9 @@ impl WgpuContext {
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+
+        let elapsed = start.elapsed();
+        log::info!("Render time: {}ms", elapsed.as_millis());
     }
 }
 
