@@ -30,14 +30,6 @@ impl Viewport {
         Viewport { surface, config }
     }
 
-    pub fn background(&self) -> wgpu::Color {
-        wgpu::Color::BLACK
-    }
-
-    pub fn foreground(&self) -> wgpu::Color {
-        wgpu::Color::WHITE
-    }
-
     pub fn width(&self) -> u32 {
         self.config.width
     }

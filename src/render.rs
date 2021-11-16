@@ -180,11 +180,8 @@ impl WgpuContext {
 fn wait_size(event_rx: &Receiver<TemuEvent>) -> (u32, u32) {
     loop {
         let e = event_rx.recv().unwrap();
-        match e {
-            TemuEvent::Resize { width, height } => {
-                return (width, height);
-            }
-            _ => {}
+        if let TemuEvent::Resize { width, height } = e {
+            return (width, height);
         }
     }
 }
@@ -279,10 +276,10 @@ struct ScrollState {
     page_size: u32,
 }
 
-struct ScrollCalcResult {
-    top: f32,
-    bottom: f32,
-}
+// struct ScrollCalcResult {
+//     top: f32,
+//     bottom: f32,
+// }
 
 impl ScrollState {
     pub fn new() -> Self {
@@ -293,24 +290,24 @@ impl ScrollState {
         }
     }
 
-    pub fn calculate(&self) -> ScrollCalcResult {
-        match self.max.checked_sub(self.top) {
-            None => ScrollCalcResult::FULL,
-            Some(left) => ScrollCalcResult {
-                top: self.top as f32 / self.max as f32,
-                bottom: left as f32 / self.max as f32,
-            },
-        }
-    }
+    // pub fn calculate(&self) -> ScrollCalcResult {
+    //     match self.max.checked_sub(self.top) {
+    //         None => ScrollCalcResult::FULL,
+    //         Some(left) => ScrollCalcResult {
+    //             top: self.top as f32 / self.max as f32,
+    //             bottom: left as f32 / self.max as f32,
+    //         },
+    //     }
+    // }
 }
 
-impl ScrollCalcResult {
-    /// Can display all lines
-    const FULL: Self = ScrollCalcResult {
-        top: 0.0,
-        bottom: 1.0,
-    };
-}
+// impl ScrollCalcResult {
+    // /// Can display all lines
+    // const FULL: Self = ScrollCalcResult {
+    //     top: 0.0,
+    //     bottom: 1.0,
+    // };
+// }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]

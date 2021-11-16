@@ -2,7 +2,6 @@ use bytemuck::{Pod, Zeroable};
 use lyon::{
     geom::{Point, Transform},
     lyon_tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers},
-    math::Size,
     path::path::Builder,
 };
 use rustybuzz::{Face, UnicodeBuffer};
@@ -136,7 +135,7 @@ impl LyonContext {
                 let path = builder.builder.build().transformed(&transform);
                 tess.tessellate_path(
                     &path,
-                    &FillOptions::default().with_tolerance(0.001),
+                    &FillOptions::default().with_tolerance(0.0001),
                     &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
                         position: v.position().to_array(),
                     }),

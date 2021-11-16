@@ -1,6 +1,6 @@
 use termwiz::escape::{
     csi::{Cursor, Edit, EraseInDisplay, EraseInLine},
-    Action, ControlCode, OneBased, CSI,
+    Action, ControlCode, CSI,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -53,7 +53,7 @@ impl Terminal {
         self.cursor
     }
 
-    pub fn rows<'a>(&'a self) -> impl Iterator<Item = &'a Line> + ExactSizeIterator + 'a {
+    pub fn rows(&self) -> impl Iterator<Item = &Line> + ExactSizeIterator + '_ {
         self.grid.iter()
     }
 
