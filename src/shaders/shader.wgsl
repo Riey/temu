@@ -25,11 +25,12 @@ struct CellOutput {
 
 struct TextInput {
     [[builtin(vertex_index)]] vertex_index: u32;
-    [[builtin(instance_index)]] cell_index: u32;
-    [[location(0)]] offset: vec2<f32>;
-    [[location(1)]] tex_size: vec2<f32>;
-    [[location(2)]] color: vec3<f32>;
-    [[location(3)]] glyph_id: u32;
+    // [[builtin(instance_index)]] cell_index: u32;
+    [[location(0)]] base_cell_index: u32;
+    [[location(1)]] offset: vec2<f32>;
+    [[location(2)]] tex_size: vec2<f32>;
+    [[location(3)]] color: vec3<f32>;
+    [[location(4)]] glyph_id: u32;
 };
 
 struct TextOutput {
@@ -49,13 +50,13 @@ struct TexRect {
     layer: i32;
 };
 
-fn calculate_cell_rect(cell_index: u32) -> Rect {
+fn calculate_cell_rect(cell_index: u32, offset: vec2<f32>) -> Rect {
     let row: u32 = cell_index / window_size.column;
     let column: u32 = cell_index % window_size.column;
 
-    var size = window_size.cell_size * 2.0 / window_size.size;
-    let begin = vec2<f32>(f32(column), f32(row)) * size;
+    let begin = (vec2<f32>(f32(column), f32(row)) * window_size.cell_size + offset) * 2.0 / window_size.size;
     let begin = vec2<f32>(begin.x - 1.0, 1.0 - begin.y);
+    var size = window_size.cell_size * 2.0 / window_size.size;
     size.y = -size.y;
 
     return Rect(begin, size);
@@ -99,7 +100,7 @@ fn get_rect_position(rect: Rect, vertex_index: u32) -> vec2<f32> {
 fn cell_vs(
     model: CellInput,
 ) -> CellOutput {
-    let rect = calculate_cell_rect(model.cell_index);
+    let rect = calculate_cell_rect(model.cell_index, vec2<f32>(0.0));
     return CellOutput(vec4<f32>(get_rect_position(rect, model.vertex_index), 1.0, 1.0), model.color);
 }
 
@@ -121,9 +122,10 @@ fn colorful_color(vertex_index: u32) -> vec3<f32> {
 fn text_vs(
     model: TextInput,
 ) -> TextOutput {
-    var rect = calculate_cell_rect(model.cell_index);
+    var rect = calculate_cell_rect(model.base_cell_index, model.offset);
     rect.size = model.tex_size / window_size.size;
     rect.size.y = -rect.size.y;
+
     let tex_rect = calculate_tex_rect(model.glyph_id, model.tex_size);
     let pos = get_rect_position(rect, model.vertex_index);
     let tex_pos = get_rect_position(tex_rect.rect, model.vertex_index);

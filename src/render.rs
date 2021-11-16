@@ -130,7 +130,7 @@ pub fn run(
     let (device, queue) = block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
             label: None,
-            features: wgpu::Features::TEXTURE_BINDING_ARRAY | wgpu::Features::UNSIZED_BINDING_ARRAY,
+            features: wgpu::Features::empty(),
             limits: wgpu::Limits::downlevel_defaults(),
         },
         None,

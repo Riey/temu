@@ -106,7 +106,11 @@ impl CellContext {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "cell_fs",
-                targets: &[viewport.format().into()],
+                targets: &[wgpu::ColorTargetState {
+                    format: viewport.format(),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                }],
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -127,10 +131,11 @@ impl CellContext {
                     array_stride: std::mem::size_of::<TextVertex>() as _,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x2,
+                        0 => Uint32,
                         1 => Float32x2,
-                        2 => Float32x3,
-                        3 => Uint32,
+                        2 => Float32x2,
+                        3 => Float32x3,
+                        4 => Uint32,
                     ],
                 }],
             },
@@ -312,16 +317,19 @@ impl CellContext {
             &[&self.font],
             &TextStyle::new(text, super::FONT_SIZE as _, 0),
         );
+        let base_cell_index = 0;
         let vertexes = layout
             .glyphs()
             .iter()
             .map(|g| {
-                dbg!(TextVertex {
+                dbg!(g.parent, g.x, g.y, g.width, g.height);
+                TextVertex {
+                    base_cell_index,
                     offset: [g.x, g.y],
                     tex_size: [g.width as f32, g.height as f32],
                     color: [1.0, 1.0, 1.0],
                     glyph_id: g.key.glyph_index as u32,
-                })
+                }
             })
             .collect::<Vec<_>>();
         queue.write_buffer(&self.text_instances, 0, bytemuck::cast_slice(&vertexes));
@@ -354,6 +362,7 @@ struct CellVertex {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct TextVertex {
+    base_cell_index: u32,
     offset: [f32; 2],
     tex_size: [f32; 2],
     color: [f32; 3],
@@ -362,7 +371,7 @@ struct TextVertex {
 
 fn create_cell_instance(count: usize) -> Vec<CellVertex> {
     std::iter::repeat_with(|| CellVertex {
-        color: [0.0, 0.0, 0.0, 1.0],
+        color: [0.0, 0.0, 0.0, 0.0],
     })
     .take(count)
     .collect()
