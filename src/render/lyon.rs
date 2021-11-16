@@ -1,8 +1,9 @@
 use bytemuck::{Pod, Zeroable};
 use lyon::{
-    geom::Point,
+    geom::{euclid::Vector2D, Point, Transform, Vector},
     lyon_tessellation::{
-        BuffersBuilder, FillOptions, FillTessellator, FillVertexConstructor, VertexBuffers,
+        BuffersBuilder, FillOptions, FillTessellator, FillVertex, FillVertexConstructor,
+        VertexBuffers,
     },
     math::Size,
     path::path::Builder,
@@ -12,14 +13,18 @@ use wgpu::util::DeviceExt;
 
 use super::Viewport;
 
+const SAMPLE_COUNT: u32 = 4;
+
 pub struct LyonContext {
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     index_count: usize,
     pipeline: wgpu::RenderPipeline,
+    msaa_texture: wgpu::TextureView,
     face: Face<'static>,
     font_width: f32,
     font_height: f32,
+    face_width: f32,
     /// real height for face
     face_height: f32,
     buzz_buf: Option<UnicodeBuffer>,
@@ -34,12 +39,10 @@ impl LyonContext {
         font_height: f32,
     ) -> Self {
         let face = Face::from_slice(super::FONT, 0).unwrap();
-        let m_glyph = face.glyph_index('M').unwrap();
-        let rect = face.glyph_bounding_box(m_glyph).unwrap();
 
-        let face_height = rect.height() as f32;
-        let path_scale = font_height / face_height;
-        let font_width = rect.width() as f32 * path_scale;
+        let face_height = face.global_bounding_box().height() as f32;
+        let face_width = face.global_bounding_box().width() as f32;
+        let font_width = face_width / face_height * font_height;
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("lyon_pipeline"),
@@ -65,6 +68,7 @@ impl LyonContext {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
                 ..Default::default()
             },
         });
@@ -91,9 +95,26 @@ impl LyonContext {
             pipeline,
             font_height,
             font_width,
+            face_width,
             face_height,
             buzz_buf: Some(UnicodeBuffer::new()),
+            msaa_texture: create_msaa_texture(
+                device,
+                viewport.format(),
+                viewport.width(),
+                viewport.height(),
+            ),
         }
+    }
+
+    pub fn resize(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) {
+        self.msaa_texture = create_msaa_texture(device, format, width, height);
     }
 
     pub fn font_height(&self) -> f32 {
@@ -128,17 +149,16 @@ impl LyonContext {
                 .outline_glyph(ttf_parser::GlyphId(info.glyph_id as _), &mut builder)
                 .is_some()
             {
-                let path = builder.builder.build();
+                let transform =
+                    Transform::translation(x + pos.x_offset as f32, y + pos.y_offset as f32)
+                        .then_scale(1.0 / self.face_width, 1.0 / self.face_height);
+                let path = builder.builder.build().transformed(&transform);
                 tess.tessellate_path(
                     &path,
                     &FillOptions::default(),
-                    &mut BuffersBuilder::new(
-                        &mut mesh,
-                        VertexCtor {
-                            scale: self.face_height,
-                            base: Size::new(x + pos.x_offset as f32, y + pos.y_offset as f32),
-                        },
-                    ),
+                    &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
+                        position: v.position().to_array(),
+                    }),
                 )
                 .unwrap();
             }
@@ -171,11 +191,30 @@ impl LyonContext {
         );
     }
 
-    pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) {
+    pub fn draw(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        bind_group: &wgpu::BindGroup,
+        view: &wgpu::TextureView,
+    ) {
         if self.index_count == 0 {
             return;
         }
 
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[wgpu::RenderPassColorAttachment {
+                view: &self.msaa_texture,
+                resolve_target: Some(view),
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: true,
+                },
+            }],
+            depth_stencil_attachment: None,
+        });
+
+        rpass.set_bind_group(0, bind_group, &[]);
         rpass.set_pipeline(&self.pipeline);
         rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
         rpass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
@@ -218,16 +257,37 @@ struct LyonVertex {
 }
 
 struct VertexCtor {
-    scale: f32,
     base: Size,
 }
 
 impl FillVertexConstructor<LyonVertex> for VertexCtor {
     fn new_vertex(&mut self, vertex: lyon::lyon_tessellation::FillVertex) -> LyonVertex {
-        let [x, y] = vertex.position().add_size(&self.base).to_array();
-
         LyonVertex {
-            position: [x / self.scale, y / self.scale],
+            position: vertex.position().to_array(),
         }
     }
+}
+
+fn create_msaa_texture(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+) -> wgpu::TextureView {
+    dbg!(width, height);
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("msaa"),
+            format,
+            dimension: wgpu::TextureDimension::D2,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: SAMPLE_COUNT,
+        })
+        .create_view(&wgpu::TextureViewDescriptor::default())
 }
