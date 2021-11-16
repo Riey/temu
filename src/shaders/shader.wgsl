@@ -53,8 +53,10 @@ fn calculate_cell_rect(cell_index: u32) -> Rect {
     let row: u32 = cell_index / window_size.column;
     let column: u32 = cell_index % window_size.column;
 
-    let size = window_size.cell_size * 2.0 / window_size.size;
+    var size = window_size.cell_size * 2.0 / window_size.size;
     let begin = vec2<f32>(f32(column), f32(row)) * size;
+    let begin = vec2<f32>(begin.x - 1.0, 1.0 - begin.y);
+    size.y = -size.y;
 
     return Rect(begin, size);
 }
@@ -73,28 +75,7 @@ fn calculate_tex_rect(glyph_id: u32, tex_size: vec2<f32>) -> TexRect {
     return TexRect(Rect(begin, size), layer);
 }
 
-fn get_cell_rect_position(rect: Rect, vertex_index: u32) -> vec2<f32> {
-    var ret = rect.begin;
-
-    switch (vertex_index) {
-        case 0: {
-        }
-        case 1: {
-            ret.x = ret.x + rect.size.x;
-        }
-        case 2: {
-            ret.y = ret.y - rect.size.y;
-        }
-        default: {
-            ret.x = ret.x + rect.size.x;
-            ret.y = ret.y - rect.size.y;
-        }
-    }
-
-    return ret;
-}
-
-fn get_tex_rect_position(rect: Rect, vertex_index: u32) -> vec2<f32> {
+fn get_rect_position(rect: Rect, vertex_index: u32) -> vec2<f32> {
     var ret = rect.begin;
 
     switch (vertex_index) {
@@ -119,7 +100,7 @@ fn cell_vs(
     model: CellInput,
 ) -> CellOutput {
     let rect = calculate_cell_rect(model.cell_index);
-    return CellOutput(vec4<f32>(get_cell_rect_position(rect, model.vertex_index), 1.0, 1.0), model.color);
+    return CellOutput(vec4<f32>(get_rect_position(rect, model.vertex_index), 1.0, 1.0), model.color);
 }
 
 [[stage(fragment)]]
@@ -127,15 +108,28 @@ fn cell_fs(in: CellOutput) -> [[location(0)]] vec4<f32> {
     return in.color;
 }
 
+fn colorful_color(vertex_index: u32) -> vec3<f32> {
+    switch (vertex_index) {
+        case 0: { return vec3<f32>(1.0, 0.0, 0.0); }
+        case 1: { return vec3<f32>(0.0, 1.0, 0.0); }
+        case 2: { return vec3<f32>(0.0, 0.0, 1.0); }
+        default: { return vec3<f32>(1.0, 1.0, 1.0); }
+    }
+}
+
 [[stage(vertex)]]
 fn text_vs(
     model: TextInput,
 ) -> TextOutput {
-    let rect = calculate_cell_rect(model.cell_index);
+    var rect = calculate_cell_rect(model.cell_index);
+    rect.size = model.tex_size / window_size.size;
+    rect.size.y = -rect.size.y;
     let tex_rect = calculate_tex_rect(model.glyph_id, model.tex_size);
-    let pos = get_cell_rect_position(rect, model.vertex_index);
-    let tex_pos = get_tex_rect_position(tex_rect.rect, model.vertex_index);
-    return TextOutput(vec4<f32>(pos, 1.0, 1.0), tex_pos, model.color, tex_rect.layer);
+    let pos = get_rect_position(rect, model.vertex_index);
+    let tex_pos = get_rect_position(tex_rect.rect, model.vertex_index);
+    let color = model.color;
+    // let color = colorful_color(model.vertex_index);
+    return TextOutput(vec4<f32>(pos, 1.0, 1.0), tex_pos, color, tex_rect.layer);
 }
 
 [[stage(fragment)]]
