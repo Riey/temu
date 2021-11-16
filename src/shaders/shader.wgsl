@@ -24,16 +24,28 @@ struct Rect {
     size: vec2<f32>;
 };
 
-fn calculate_cell_rect(cell_index: u32, offset: vec2<f32>) -> Rect {
+fn pixel_to_ndc(px: vec2<f32>) -> vec2<f32> {
+    let norm = px * 2.0 / window_size.size;
+    return vec2<f32>(norm.x - 1.0, 1.0 - norm.y);
+}
+
+fn pixel_size_to_ndc(size: vec2<f32>) -> vec2<f32> {
+    let size = size * 2.0 / window_size.size;
+    return vec2<f32>(size.x, -size.y);
+}
+
+fn calculate_text_pos(line_no: f32, position: vec2<f32>) -> vec2<f32> {
+    let pixel_pos = vec2<f32>(0.0, (line_no + 1.0) * window_size.cell_size.y) + vec2<f32>(position.x, -position.y);
+    return pixel_to_ndc(pixel_pos);
+}
+
+fn calculate_cell_rect(cell_index: u32) -> Rect {
     let row: u32 = cell_index / window_size.column;
     let column: u32 = cell_index % window_size.column;
 
-    let begin = (vec2<f32>(f32(column), f32(row)) * window_size.cell_size + offset) * 2.0 / window_size.size;
-    let begin = vec2<f32>(begin.x - 1.0, 1.0 - begin.y);
-    var size = window_size.cell_size * 2.0 / window_size.size;
-    size.y = -size.y;
+    let begin = vec2<f32>(f32(column), f32(row)) * window_size.cell_size;
 
-    return Rect(begin, size);
+    return Rect(pixel_to_ndc(begin), pixel_size_to_ndc(window_size.cell_size));
 }
 
 fn get_rect_position(rect: Rect, vertex_index: u32) -> vec2<f32> {
@@ -69,7 +81,7 @@ fn colorful_color(vertex_index: u32) -> vec3<f32> {
 fn cell_vs(
     model: VertexInput,
 ) -> VertexOutput {
-    let rect = calculate_cell_rect(model.cell_index, vec2<f32>(0.0));
+    let rect = calculate_cell_rect(model.cell_index);
     let color = vec4<f32>(colorful_color(model.vertex_index), 1.0);
     return VertexOutput(vec4<f32>(get_rect_position(rect, model.vertex_index), 1.0, 1.0), color);
 }
@@ -80,8 +92,8 @@ fn simple_fs(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 }
 
 struct LyonInput {
-    [[builtin(vertex_index)]] vertex_index: u32;
     [[location(0)]] position: vec2<f32>;
+    [[location(1)]] line_no: f32;
 };
 
 struct LyonOutput {
@@ -91,10 +103,9 @@ struct LyonOutput {
 
 [[stage(vertex)]]
 fn lyon_vs(model: LyonInput) -> VertexOutput {
-    let scale = window_size.cell_size.yy * 2.0 / window_size.size;
-    // let position = model.position;
-    var position = model.position * scale + vec2<f32>(-1.0, 1.0 - scale.y);
-    // position.x = position.x * 2.0 - 1.0;
-    // position.y = position.y * 2.0;
+    let scale = window_size.cell_size.yy;
+    let offset = model.position * scale;
+
+    let position = calculate_text_pos(model.line_no, offset);
     return VertexOutput(vec4<f32>(position, 1.0, 1.0), vec4<f32>(1.0));
 }

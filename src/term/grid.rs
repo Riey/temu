@@ -181,6 +181,8 @@ impl Terminal {
 
 #[test]
 fn grid() {
+    use termwiz::escape::OneBased;
+
     let mut grid = Terminal::new(10);
     grid.perform_action(Action::CSI(CSI::Cursor(Cursor::Position {
         col: OneBased::from_zero_based(0),
