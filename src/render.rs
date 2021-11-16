@@ -1,3 +1,4 @@
+mod scroll;
 mod cell;
 mod lyon;
 mod viewport;
@@ -8,11 +9,10 @@ use std::{
 };
 
 pub use self::viewport::Viewport;
-use self::{cell::CellContext, lyon::LyonContext};
+use self::{cell::CellContext, lyon::LyonContext, scroll::ScrollState};
 use crate::term::{SharedTerminal, Terminal};
 use crossbeam_channel::Receiver;
-use futures_executor::{block_on, LocalPool, LocalSpawner};
-use futures_task::{LocalFutureObj, LocalSpawn};
+use futures_executor::block_on;
 use temu_window::TemuEvent;
 use wgpu::util::DeviceExt;
 
@@ -27,11 +27,9 @@ pub struct WgpuContext {
     queue: wgpu::Queue,
     cell_ctx: CellContext,
     lyon_ctx: LyonContext,
-    staging_belt: wgpu::util::StagingBelt,
     window_size_buf: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     scroll_state: ScrollState,
-    terminal: Terminal,
     str_buf: String,
     msaa: wgpu::TextureView,
     next_resize: Option<(u32, u32)>,
@@ -109,12 +107,10 @@ impl WgpuContext {
             window_size_buf,
             bind_group,
             viewport,
-            staging_belt: wgpu::util::StagingBelt::new(1024),
             device,
             queue,
             next_resize: None,
             scroll_state,
-            terminal: Terminal::new(100),
             str_buf: String::new(),
         }
     }
@@ -126,7 +122,7 @@ impl WgpuContext {
         self.next_resize = Some((width, height));
     }
 
-    pub fn redraw(&mut self, spawner: &LocalSpawner) {
+    pub fn redraw(&mut self) {
         if let Some((width, height)) = self.next_resize.take() {
             self.viewport.resize(&self.device, width, height);
             self.msaa = create_msaa_texture(&self.device, self.viewport.format(), width, height);
@@ -156,7 +152,7 @@ impl WgpuContext {
                     view: &self.msaa,
                     resolve_target: Some(&view),
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: true,
                     },
                 }],
@@ -168,12 +164,8 @@ impl WgpuContext {
             self.lyon_ctx.draw(&mut rpass);
         }
 
-        self.staging_belt.finish();
         self.queue.submit(Some(encoder.finish()));
         frame.present();
-        spawner
-            .spawn_local_obj(LocalFutureObj::new(Box::new(self.staging_belt.recall())))
-            .unwrap();
     }
 }
 
@@ -192,9 +184,6 @@ pub fn run(
     event_rx: Receiver<TemuEvent>,
     shared_terminal: Arc<SharedTerminal>,
 ) {
-    let mut local_pool = LocalPool::new();
-    let local_spawner = local_pool.spawner();
-
     let mut need_redraw = true;
 
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -217,7 +206,6 @@ pub fn run(
 
     let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
     let mut ctx = WgpuContext::new(viewport, device, queue);
-    ctx.lyon_ctx.set_draw(&ctx.device, "Hello, world!");
     let mut next_render_time = Instant::now();
     const FPS: u64 = 60;
     const FRAMETIME: Duration = Duration::from_millis(1000 / FPS);
@@ -227,15 +215,14 @@ pub fn run(
             let now = Instant::now();
 
             if now >= next_render_time {
-                ctx.redraw(&local_spawner);
-                local_pool.run_until_stalled();
+                ctx.redraw();
                 need_redraw = false;
                 next_render_time = now + FRAMETIME;
             }
         }
 
         if let Some(terminal) = shared_terminal.take_terminal() {
-            ctx.terminal = terminal;
+            ctx.lyon_ctx.set_draw(&ctx.device, &terminal);
             need_redraw = true;
         }
 
@@ -269,45 +256,6 @@ pub fn run(
         }
     }
 }
-
-struct ScrollState {
-    top: u32,
-    max: u32,
-    page_size: u32,
-}
-
-// struct ScrollCalcResult {
-//     top: f32,
-//     bottom: f32,
-// }
-
-impl ScrollState {
-    pub fn new() -> Self {
-        Self {
-            top: 0,
-            max: 1,
-            page_size: 1,
-        }
-    }
-
-    // pub fn calculate(&self) -> ScrollCalcResult {
-    //     match self.max.checked_sub(self.top) {
-    //         None => ScrollCalcResult::FULL,
-    //         Some(left) => ScrollCalcResult {
-    //             top: self.top as f32 / self.max as f32,
-    //             bottom: left as f32 / self.max as f32,
-    //         },
-    //     }
-    // }
-}
-
-// impl ScrollCalcResult {
-    // /// Can display all lines
-    // const FULL: Self = ScrollCalcResult {
-    //     top: 0.0,
-    //     bottom: 1.0,
-    // };
-// }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]

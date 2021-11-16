@@ -7,6 +7,8 @@ use lyon::{
 use rustybuzz::{Face, UnicodeBuffer};
 use wgpu::util::{DeviceExt, RenderEncoder};
 
+use crate::term::Terminal;
+
 use super::Viewport;
 
 const SAMPLE_COUNT: u32 = 4;
@@ -47,6 +49,7 @@ impl LyonContext {
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &wgpu::vertex_attr_array![
                         0 => Float32x2,
+                        1 => Float32,
                     ],
                 }],
             },
@@ -104,46 +107,57 @@ impl LyonContext {
         self.font_width
     }
 
-    pub fn set_draw(&mut self, device: &wgpu::Device, s: &str) {
+    pub fn set_draw(&mut self, device: &wgpu::Device, term: &Terminal) {
         let mut buzz_buf = self.buzz_buf.take().unwrap();
-        buzz_buf.push_str(s);
-
-        let glyph_buf = rustybuzz::shape(&self.face, &[], buzz_buf);
-
-        let positions = glyph_buf.glyph_positions();
-        let infos = glyph_buf.glyph_infos();
 
         let scale = 1.0 / self.face.units_per_em() as f32;
-        let mut x = 0.0;
-        let mut y = 0.0;
 
         let mut tess = FillTessellator::new();
         let mut mesh = VertexBuffers::<LyonVertex, u32>::new();
+        let mut line_str = String::new();
 
-        for (pos, info) in positions.iter().zip(infos.iter()) {
-            let mut builder = LyonBuilder {
-                builder: Builder::new(),
-            };
-            if self
-                .face
-                .outline_glyph(ttf_parser::GlyphId(info.glyph_id as _), &mut builder)
-                .is_some()
-            {
-                let transform =
-                    Transform::translation(x + pos.x_offset as f32, y + pos.y_offset as f32)
-                        .then_scale(scale, scale);
-                let path = builder.builder.build().transformed(&transform);
-                tess.tessellate_path(
-                    &path,
-                    &FillOptions::default().with_tolerance(0.0001),
-                    &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
-                        position: v.position().to_array(),
-                    }),
-                )
-                .unwrap();
+        for (line_no, line) in term.rows().enumerate() {
+            let line_no = line_no as f32;
+            line.write_text(&mut line_str);
+            buzz_buf.push_str(&line_str);
+
+            let glyph_buf = rustybuzz::shape(&self.face, &[], buzz_buf);
+
+            let positions = glyph_buf.glyph_positions();
+            let infos = glyph_buf.glyph_infos();
+
+            let mut x = 0.0;
+            let mut y = 0.0;
+
+            for (pos, info) in positions.iter().zip(infos.iter()) {
+                let mut builder = LyonBuilder {
+                    builder: Builder::new(),
+                };
+                if self
+                    .face
+                    .outline_glyph(ttf_parser::GlyphId(info.glyph_id as _), &mut builder)
+                    .is_some()
+                {
+                    let transform =
+                        Transform::translation(x + pos.x_offset as f32, y + pos.y_offset as f32)
+                            .then_scale(scale, scale);
+                    let path = builder.builder.build().transformed(&transform);
+                    tess.tessellate_path(
+                        &path,
+                        &FillOptions::default().with_tolerance(0.0001),
+                        &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
+                            position: v.position().to_array(),
+                            line_no,
+                        }),
+                    )
+                    .unwrap();
+                }
+                x += pos.x_advance as f32;
+                y += pos.y_advance as f32;
             }
-            x += pos.x_advance as f32;
-            y += pos.y_advance as f32;
+
+            buzz_buf = glyph_buf.clear();
+            line_str.clear();
         }
 
         self.vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -160,8 +174,6 @@ impl LyonContext {
 
         self.index_count = mesh.indices.len();
 
-        buzz_buf = glyph_buf.clear();
-        buzz_buf.clear();
         self.buzz_buf = Some(buzz_buf);
 
         log::info!(
@@ -215,4 +227,5 @@ impl ttf_parser::OutlineBuilder for LyonBuilder {
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct LyonVertex {
     position: [f32; 2],
+    line_no: f32,
 }
