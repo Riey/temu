@@ -27,7 +27,6 @@ impl CellContext {
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
                         0 => Float32x4,
-                        1 => Float32x4,
                     ],
                 }],
             },
@@ -50,7 +49,7 @@ impl CellContext {
 
         let instances = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell Vertex Buffer"),
-            contents: bytemuck::cast_slice(&create_cell_instance(5, 10)),
+            contents: bytemuck::cast_slice(&create_cell_instance(100, 20)),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -63,7 +62,7 @@ impl CellContext {
     pub fn draw<'a>(&'a self, rpass: &mut impl RenderEncoder<'a>) {
         rpass.set_pipeline(&self.pipeline);
         rpass.set_vertex_buffer(0, self.instances.slice(..));
-        rpass.draw(0..4, 0..15);
+        rpass.draw(0..4, 0..2000);
     }
 }
 
@@ -71,14 +70,10 @@ impl CellContext {
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct Vertex {
     color: [f32; 4],
-    bg_color: [f32; 4],
 }
 
 fn create_cell_instance(column: u32, row: u32) -> Vec<Vertex> {
     (0..(column * row))
-        .map(|_| Vertex {
-            color: [1.0, 1.0, 1.0, 1.0],
-            bg_color: [0.0, 0.0, 0.0, 1.0],
-        })
+        .map(|_| Vertex { color: [0.0; 4] })
         .collect()
 }

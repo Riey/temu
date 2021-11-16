@@ -1,6 +1,6 @@
-mod scroll;
 mod cell;
 mod lyon;
+mod scroll;
 mod viewport;
 
 use std::{
@@ -18,7 +18,7 @@ use wgpu::util::DeviceExt;
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 const SAMPLE_COUNT: u32 = 4;
-const FONT_SIZE: u32 = 100;
+const FONT_SIZE: f32 = 15.0;
 
 #[allow(unused)]
 pub struct WgpuContext {
@@ -36,7 +36,12 @@ pub struct WgpuContext {
 }
 
 impl WgpuContext {
-    pub fn new(viewport: Viewport, device: wgpu::Device, queue: wgpu::Queue) -> Self {
+    pub fn new(
+        viewport: Viewport,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        scale_factor: f32,
+    ) -> Self {
         let mut scroll_state = ScrollState::new();
         scroll_state.page_size = 20;
         scroll_state.top = 10;
@@ -69,7 +74,7 @@ impl WgpuContext {
             &shader,
             &pipeline_layout,
             &viewport,
-            FONT_SIZE as _,
+            FONT_SIZE as f32 * scale_factor,
         );
         let cell_size = [lyon_ctx.font_width(), lyon_ctx.font_height()];
 
@@ -77,7 +82,7 @@ impl WgpuContext {
         let window_size = WindowSize {
             size: [viewport.width() as _, viewport.height() as _],
             cell_size,
-            column: 5,
+            column: 100,
         };
 
         let window_size_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -169,18 +174,12 @@ impl WgpuContext {
     }
 }
 
-fn wait_size(event_rx: &Receiver<TemuEvent>) -> (u32, u32) {
-    loop {
-        let e = event_rx.recv().unwrap();
-        if let TemuEvent::Resize { width, height } = e {
-            return (width, height);
-        }
-    }
-}
-
 pub fn run(
     instance: wgpu::Instance,
     surface: wgpu::Surface,
+    width: u32,
+    height: u32,
+    scale_factor: f32,
     event_rx: Receiver<TemuEvent>,
     shared_terminal: Arc<SharedTerminal>,
 ) {
@@ -202,12 +201,12 @@ pub fn run(
     ))
     .expect("Failed to create device");
 
-    let mut prev_resize = wait_size(&event_rx);
+    let mut prev_resize = (width, height);
 
     let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
-    let mut ctx = WgpuContext::new(viewport, device, queue);
+    let mut ctx = WgpuContext::new(viewport, device, queue, scale_factor);
     let mut next_render_time = Instant::now();
-    const FPS: u64 = 60;
+    const FPS: u64 = 120;
     const FRAMETIME: Duration = Duration::from_millis(1000 / FPS);
 
     loop {

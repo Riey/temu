@@ -11,7 +11,6 @@ struct VertexInput {
     [[builtin(vertex_index)]] vertex_index: u32;
     [[builtin(instance_index)]] cell_index: u32;
     [[location(0)]] color: vec4<f32>;
-    [[location(1)]] bg_color: vec4<f32>;
 };
 
 struct VertexOutput {
@@ -82,7 +81,8 @@ fn cell_vs(
     model: VertexInput,
 ) -> VertexOutput {
     let rect = calculate_cell_rect(model.cell_index);
-    let color = vec4<f32>(colorful_color(model.vertex_index), 1.0);
+    let color = model.color;
+    // let color = vec4<f32>(colorful_color(model.vertex_index), 1.0);
     return VertexOutput(vec4<f32>(get_rect_position(rect, model.vertex_index), 1.0, 1.0), color);
 }
 

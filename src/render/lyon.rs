@@ -144,7 +144,7 @@ impl LyonContext {
                     let path = builder.builder.build().transformed(&transform);
                     tess.tessellate_path(
                         &path,
-                        &FillOptions::default().with_tolerance(0.0001),
+                        &FillOptions::default().with_tolerance(0.008),
                         &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
                             position: v.position().to_array(),
                             line_no,
