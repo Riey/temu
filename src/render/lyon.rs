@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use lyon::{
-    geom::{euclid::Vector2D, Point, Transform, Vector},
+    geom::{Point, Transform},
     lyon_tessellation::{
         BuffersBuilder, FillOptions, FillTessellator, FillVertex, FillVertexConstructor,
         VertexBuffers,
@@ -20,7 +20,6 @@ pub struct LyonContext {
     index_buf: wgpu::Buffer,
     index_count: usize,
     pipeline: wgpu::RenderPipeline,
-    msaa_texture: wgpu::TextureView,
     face: Face<'static>,
     font_width: f32,
     font_height: f32,
@@ -103,23 +102,7 @@ impl LyonContext {
             face_width,
             face_height,
             buzz_buf: Some(UnicodeBuffer::new()),
-            msaa_texture: create_msaa_texture(
-                device,
-                viewport.format(),
-                viewport.width(),
-                viewport.height(),
-            ),
         }
-    }
-
-    pub fn resize(
-        &mut self,
-        device: &wgpu::Device,
-        format: wgpu::TextureFormat,
-        width: u32,
-        height: u32,
-    ) {
-        self.msaa_texture = create_msaa_texture(device, format, width, height);
     }
 
     pub fn font_height(&self) -> f32 {
@@ -252,28 +235,4 @@ impl FillVertexConstructor<LyonVertex> for VertexCtor {
             position: vertex.position().to_array(),
         }
     }
-}
-
-fn create_msaa_texture(
-    device: &wgpu::Device,
-    format: wgpu::TextureFormat,
-    width: u32,
-    height: u32,
-) -> wgpu::TextureView {
-    dbg!(width, height);
-    device
-        .create_texture(&wgpu::TextureDescriptor {
-            label: Some("msaa"),
-            format,
-            dimension: wgpu::TextureDimension::D2,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: SAMPLE_COUNT,
-        })
-        .create_view(&wgpu::TextureViewDescriptor::default())
 }

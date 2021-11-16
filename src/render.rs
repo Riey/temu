@@ -76,7 +76,7 @@ impl WgpuContext {
 
         // Create window size
         let window_size = WindowSize {
-            size: [600.0, 400.0],
+            size: [viewport.width() as _, viewport.height() as _],
             cell_size,
             column: 5,
         };
@@ -120,13 +120,12 @@ impl WgpuContext {
     pub fn resize(&mut self, width: u32, height: u32) {
         log::info!("Resize({}, {})", width, height);
 
+        self.msaa = create_msaa_texture(&self.device, self.viewport.format(), width, height);
         self.queue.write_buffer(
             &self.window_size_buf,
             0,
             bytemuck::cast_slice(&[width as f32, height as f32]),
         );
-        self.lyon_ctx
-            .resize(&self.device, self.viewport.format(), width, height);
         self.viewport.resize(&self.device, width, height);
         // TODO: update scroll_state
     }
