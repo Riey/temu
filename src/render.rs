@@ -169,6 +169,9 @@ pub fn run(
                     break;
                 }
                 TemuEvent::Resize { width, height } => {
+                    if width == 0 || height == 0 {
+                        continue;
+                    }
                     if prev_resize != (width, height) {
                         ctx.resize(width, height);
                         need_redraw = true;

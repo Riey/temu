@@ -25,13 +25,18 @@ impl crate::TemuWindow for WinitWindow {
         let event_loop = EventLoop::new();
         let inner = WindowBuilder::new()
             .with_inner_size(LogicalSize::new(600, 400))
+            .with_title("Temu")
+            // for debug purpose
+            .with_always_on_top(true)
             .build(&event_loop)
             .unwrap();
 
+        let factor = inner.scale_factor();
+
         event_tx
             .send(TemuEvent::Resize {
-                width: 600,
-                height: 400,
+                width: (600.0 * factor) as u32,
+                height: (400.0 * factor) as u32,
             })
             .unwrap();
 
