@@ -212,6 +212,9 @@ impl CellContext {
                     let glyph_id_row = glyph_id_base + text_per_column as u16 * row_index as u16;
                     for column_index in 0..text_per_column as usize {
                         let glyph_id = glyph_id_row + column_index as u16;
+                        if font.glyph_count() <= glyph_id {
+                            return;
+                        }
                         let (metric, raster) = font.rasterize_indexed(glyph_id, font_size);
                         if raster.is_empty() {
                             continue;
