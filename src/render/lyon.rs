@@ -21,6 +21,7 @@ pub struct LyonContext {
     face: Face<'static>,
     font_width: f32,
     font_height: f32,
+    face_descender: f32,
     buzz_buf: Option<UnicodeBuffer>,
 }
 
@@ -37,6 +38,7 @@ impl LyonContext {
         let h_advance = face.glyph_hor_advance(m).unwrap();
         let face_width = h_advance as f32;
         let font_width = face_width / face.units_per_em() as f32 * font_height;
+        let face_descender = face.descender() as f32;
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("lyon_pipeline"),
@@ -95,6 +97,7 @@ impl LyonContext {
             pipeline,
             font_height,
             font_width,
+            face_descender,
             buzz_buf: Some(UnicodeBuffer::new()),
         }
     }
@@ -139,7 +142,7 @@ impl LyonContext {
                     .is_some()
                 {
                     let transform =
-                        Transform::translation(x + pos.x_offset as f32, y + pos.y_offset as f32)
+                        Transform::translation(x + pos.x_offset as f32, y + pos.y_offset as f32 - self.face_descender)
                             .then_scale(scale, scale);
                     let path = builder.builder.build().transformed(&transform);
                     tess.tessellate_path(

@@ -152,7 +152,6 @@ impl WgpuContext {
     }
 
     pub fn update_terminal(&mut self, term: &Terminal) {
-        log::info!("Update cursor: {:?}", term.cursor());
         let cursor_pos = (term.cursor().0 + term.cursor().1 * 100) * size_of::<CellInfo>();
         self.next_curosr_pos = if self.prev_cursor_pos == cursor_pos {
             None
@@ -183,7 +182,6 @@ impl WgpuContext {
         }
 
         if let Some(next_cursor_pos) = self.next_curosr_pos.take() {
-            log::info!("Draw cursor {} -> {}", self.prev_cursor_pos, next_cursor_pos);
             self.queue.write_buffer(
                 &self.cell_infos_buf,
                 self.prev_cursor_pos as u64,
