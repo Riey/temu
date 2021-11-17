@@ -27,8 +27,8 @@ impl crate::TemuWindow for WinitWindow {
             .with_inner_size(LogicalSize::new(600, 400))
             .with_transparent(true)
             .with_title("Temu")
-            // // for debug purpose
-            // .with_always_on_top(true)
+            // for debug purpose
+            .with_always_on_top(true)
             .build(&event_loop)
             .unwrap();
 

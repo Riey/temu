@@ -199,7 +199,7 @@ impl WgpuContext {
         frame.present();
 
         let elapsed = start.elapsed();
-        log::info!("Render time: {}ms", elapsed.as_millis());
+        log::info!("Render time: {}us", elapsed.as_micros());
     }
 }
 
