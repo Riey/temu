@@ -10,6 +10,7 @@ use lyon::{
 use rustybuzz::{Face, UnicodeBuffer};
 use ttf_parser::GlyphId;
 use wgpu::util::{DeviceExt, RenderEncoder};
+use rayon::prelude::*;
 
 use crate::term::Terminal;
 

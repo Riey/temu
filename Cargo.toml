@@ -30,6 +30,7 @@ lyon = "0.17.10"
 rustybuzz = "0.4.0"
 ttf-parser = "0.12"
 ahash = "0.7.6"
+rayon = "1.5.1"
 
 [features]
 
