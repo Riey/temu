@@ -49,8 +49,11 @@ impl CellContext {
         )
         .unwrap();
 
-        let font_width = font.metrics('M', font_size).advance_width.ceil();
-        let cell_size = [font_width, font_size];
+        let metrics = font.metrics('M', font_size);
+        // monospace width
+        let font_width = metrics.advance_width;
+        let font_height = font.horizontal_line_metrics(font_size).unwrap().new_line_size;
+        let cell_size = [font_width, font_height];
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("size_bind_group_layout"),
