@@ -43,7 +43,7 @@ impl CellContext {
         .unwrap();
 
         let font_height = font_size;
-        let font_width = font.metrics('Q', font_size).advance_width as f32;
+        let font_width = font.metrics('M', font_size).advance_width.ceil();
         let cell_size = [font_width, font_height];
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -232,9 +232,13 @@ impl CellContext {
             });
 
         // use std::io::Write;
-        // let mut out = std::fs::File::create("foo.pgm").unwrap();
-        // write!(out, "P5\n1024 1024\n255\n").unwrap();
-        // out.write_all(&data[..1024*1024]).unwrap();
+        // let mut out = std::fs::OpenOptions::new()
+        //     .write(true)
+        //     .create(true)
+        //     .open("foo.pgm")
+        //     .unwrap();
+        // write!(out, "P5\n{} {}\n255\n", TEXTURE_WIDTH, TEXTURE_WIDTH).unwrap();
+        // out.write_all(&data[..TEXTURE_SIZE]).unwrap();
         // out.flush().unwrap();
 
         queue.write_texture(
@@ -321,14 +325,12 @@ impl CellContext {
         let vertexes = layout
             .glyphs()
             .iter()
-            .map(|g| {
-                TextVertex {
-                    base_cell_index,
-                    offset: [g.x, g.y],
-                    tex_size: [g.width as f32, g.height as f32],
-                    color: [1.0, 1.0, 1.0],
-                    glyph_id: g.key.glyph_index as u32,
-                }
+            .map(|g| TextVertex {
+                base_cell_index,
+                offset: [g.x, g.y],
+                tex_size: [g.width as f32, g.height as f32],
+                color: [1.0, 1.0, 1.0],
+                glyph_id: g.key.glyph_index as u32,
             })
             .collect::<Vec<_>>();
         queue.write_buffer(&self.text_instances, 0, bytemuck::cast_slice(&vertexes));
