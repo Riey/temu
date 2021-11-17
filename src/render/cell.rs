@@ -26,7 +26,7 @@ impl CellContext {
                     array_stride: std::mem::size_of::<Vertex>() as _,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x4,
+                        0 => Uint32,
                     ],
                 }],
             },
@@ -69,11 +69,11 @@ impl CellContext {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct Vertex {
-    color: [f32; 4],
+    cell_index: u32,
 }
 
 fn create_cell_instance(column: u32, row: u32) -> Vec<Vertex> {
     (0..(column * row))
-        .map(|_| Vertex { color: [0.0; 4] })
+        .map(|cell_index| Vertex { cell_index })
         .collect()
 }

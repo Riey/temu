@@ -10,7 +10,7 @@ use std::{
 
 pub use self::viewport::Viewport;
 use self::{cell::CellContext, lyon::LyonContext, scroll::ScrollState};
-use crate::term::{SharedTerminal, Terminal};
+use crate::term::SharedTerminal;
 use crossbeam_channel::Receiver;
 use futures_executor::block_on;
 use temu_window::TemuEvent;
@@ -48,17 +48,29 @@ impl WgpuContext {
         scroll_state.max = 50;
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("size_bind_group_layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            label: Some("bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -91,13 +103,25 @@ impl WgpuContext {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let cell_infos_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cell infos buffer"),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            contents: bytemuck::cast_slice(&vec![CellInfo { color: [0.0; 4] }; 10000]),
+        });
+
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("window size bind group"),
             layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(window_size_buf.as_entire_buffer_binding()),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: window_size_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: cell_infos_buf.as_entire_binding(),
+                },
+            ],
         });
 
         Self {
@@ -267,6 +291,12 @@ pub struct WindowSize {
     size: [f32; 2],
     cell_size: [f32; 2],
     column: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CellInfo {
+    color: [f32; 4],
 }
 
 fn create_msaa_texture(
