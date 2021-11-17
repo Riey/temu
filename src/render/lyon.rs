@@ -1,10 +1,14 @@
+use std::time::Instant;
+
+use ahash::AHashMap;
 use bytemuck::{Pod, Zeroable};
 use lyon::{
     geom::{Point, Transform},
     lyon_tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers},
-    path::path::Builder,
+    path::{path::Builder, Path},
 };
 use rustybuzz::{Face, UnicodeBuffer};
+use ttf_parser::GlyphId;
 use wgpu::util::{DeviceExt, RenderEncoder};
 
 use crate::term::Terminal;
@@ -23,6 +27,7 @@ pub struct LyonContext {
     font_height: f32,
     face_descender: f32,
     buzz_buf: Option<UnicodeBuffer>,
+    path_cache: AHashMap<GlyphId, Option<Path>>,
 }
 
 impl LyonContext {
@@ -52,6 +57,9 @@ impl LyonContext {
                     attributes: &wgpu::vertex_attr_array![
                         0 => Float32x2,
                         1 => Float32,
+                        2 => Float32x2,
+                        3 => Float32x2,
+                        4 => Float32x2,
                     ],
                 }],
             },
@@ -98,6 +106,7 @@ impl LyonContext {
             font_height,
             font_width,
             face_descender,
+            path_cache: AHashMap::with_capacity(500),
             buzz_buf: Some(UnicodeBuffer::new()),
         }
     }
@@ -111,6 +120,8 @@ impl LyonContext {
     }
 
     pub fn set_draw(&mut self, device: &wgpu::Device, term: &Terminal) {
+        let start = Instant::now();
+
         let mut buzz_buf = self.buzz_buf.take().unwrap();
 
         let scale = 1.0 / self.face.units_per_em() as f32;
@@ -133,28 +144,37 @@ impl LyonContext {
             let mut y = 0.0;
 
             for (pos, info) in positions.iter().zip(infos.iter()) {
-                let mut builder = LyonBuilder {
-                    builder: Builder::new(),
-                };
-                if self
-                    .face
-                    .outline_glyph(ttf_parser::GlyphId(info.glyph_id as _), &mut builder)
-                    .is_some()
-                {
-                    let transform =
-                        Transform::translation(x + pos.x_offset as f32, y + pos.y_offset as f32 - self.face_descender)
-                            .then_scale(scale, scale);
-                    let path = builder.builder.build().transformed(&transform);
+                let face = &self.face;
+                let path = self
+                    .path_cache
+                    .entry(GlyphId(info.glyph_id as _))
+                    .or_insert_with_key(|id| {
+                        let mut builder = LyonBuilder {
+                            builder: Builder::new(),
+                        };
+                        face.outline_glyph(*id, &mut builder)?;
+                        Some(builder.builder.build())
+                    });
+
+                if let Some(path) = path {
+                    let transform = Transform::translation(
+                        x + pos.x_offset as f32,
+                        y + pos.y_offset as f32 - self.face_descender,
+                    )
+                    .then_scale(scale, scale);
+
                     tess.tessellate_path(
-                        &path,
+                        &*path,
                         &FillOptions::default().with_tolerance(0.008),
                         &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
                             position: v.position().to_array(),
                             line_no,
+                            transform: transform.to_arrays(),
                         }),
                     )
                     .unwrap();
                 }
+
                 x += pos.x_advance as f32;
                 y += pos.y_advance as f32;
             }
@@ -179,8 +199,11 @@ impl LyonContext {
 
         self.buzz_buf = Some(buzz_buf);
 
+        let elapsed = start.elapsed();
+
         log::info!(
-            "vertex: {}, index: {}",
+            "Tessellation complete in {}us, vertex: {}, index: {}",
+            elapsed.as_micros(),
             mesh.vertices.len(),
             mesh.indices.len()
         );
@@ -231,4 +254,5 @@ impl ttf_parser::OutlineBuilder for LyonBuilder {
 struct LyonVertex {
     position: [f32; 2],
     line_no: f32,
+    transform: [[f32; 2]; 3],
 }

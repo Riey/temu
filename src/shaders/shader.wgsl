@@ -108,6 +108,9 @@ fn simple_fs(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 struct LyonInput {
     [[location(0)]] position: vec2<f32>;
     [[location(1)]] line_no: f32;
+    [[location(2)]] transform_mat1: vec2<f32>;
+    [[location(3)]] transform_mat2: vec2<f32>;
+    [[location(4)]] transform_mat3: vec2<f32>;
 };
 
 struct LyonOutput {
@@ -117,8 +120,15 @@ struct LyonOutput {
 
 [[stage(vertex)]]
 fn lyon_vs(model: LyonInput) -> VertexOutput {
-    let scale = window_size.cell_size.yy;
-    let offset = model.position * scale;
+    let offset = model.position;
+
+    let model_matrix = mat3x3<f32>(
+        vec3<f32>(model.transform_mat1, 0.0),
+        vec3<f32>(model.transform_mat2, 0.0),
+        vec3<f32>(model.transform_mat3, 1.0),
+    );
+
+    let offset = (model_matrix * vec3<f32>(offset, 1.0)).xy * window_size.cell_size.yy;
 
     let position = calculate_text_pos(model.line_no, offset);
     return VertexOutput(vec4<f32>(position, 1.0, 1.0), vec4<f32>(1.0));

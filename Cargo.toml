@@ -29,8 +29,12 @@ crossbeam-channel = "0.5.1"
 lyon = "0.17.10"
 rustybuzz = "0.4.0"
 ttf-parser = "0.12"
+ahash = "0.7.6"
 
 [features]
+
+[profile.dev.package."*"]
+opt-level = 2
 
 [profile.release]
 lto = "thin"
