@@ -7,10 +7,10 @@ use lyon::{
     lyon_tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers},
     path::{path::Builder, Path},
 };
+use rayon::prelude::*;
 use rustybuzz::{Face, UnicodeBuffer};
 use ttf_parser::GlyphId;
 use wgpu::util::{DeviceExt, RenderEncoder};
-use rayon::prelude::*;
 
 use crate::term::Terminal;
 
@@ -27,7 +27,6 @@ pub struct LyonContext {
     font_width: f32,
     font_height: f32,
     face_descender: f32,
-    buzz_buf: Option<UnicodeBuffer>,
     path_cache: AHashMap<GlyphId, Path>,
 }
 
@@ -123,7 +122,6 @@ impl LyonContext {
             font_width,
             face_descender,
             path_cache,
-            buzz_buf: Some(UnicodeBuffer::new()),
         }
     }
 
@@ -138,78 +136,91 @@ impl LyonContext {
     pub fn set_draw(&mut self, device: &wgpu::Device, term: &Terminal) {
         let start = Instant::now();
 
-        let mut buzz_buf = self.buzz_buf.take().unwrap();
-
         let scale = 1.0 / self.face.units_per_em() as f32;
 
-        let mut tess = FillTessellator::new();
-        let mut mesh = VertexBuffers::<LyonVertex, u32>::new();
-        let mut line_str = String::new();
+        let meshes: Vec<_> = term
+            .rows()
+            .par_iter()
+            .enumerate()
+            .map(|(line_no, line)| {
+                let mut tess = FillTessellator::new();
+                let mut mesh = VertexBuffers::<LyonVertex, u32>::new();
+                let mut buzz_buf = UnicodeBuffer::new();
+                let mut line_str = String::new();
+                let line_no = line_no as f32;
+                line.write_text(&mut line_str);
+                buzz_buf.push_str(&line_str);
 
-        for (line_no, line) in term.rows().enumerate() {
-            let line_no = line_no as f32;
-            line.write_text(&mut line_str);
-            buzz_buf.push_str(&line_str);
+                let glyph_buf = rustybuzz::shape(&self.face, &[], buzz_buf);
 
-            let glyph_buf = rustybuzz::shape(&self.face, &[], buzz_buf);
+                let positions = glyph_buf.glyph_positions();
+                let infos = glyph_buf.glyph_infos();
 
-            let positions = glyph_buf.glyph_positions();
-            let infos = glyph_buf.glyph_infos();
+                let mut x = 0.0;
+                let mut y = 0.0;
 
-            let mut x = 0.0;
-            let mut y = 0.0;
+                for (pos, info) in positions.iter().zip(infos.iter()) {
+                    if let Some(path) = self.path_cache.get(&GlyphId(info.glyph_id as _)) {
+                        let transform = Transform::translation(
+                            x + pos.x_offset as f32,
+                            y + pos.y_offset as f32 - self.face_descender,
+                        )
+                        .then_scale(scale, scale);
 
-            for (pos, info) in positions.iter().zip(infos.iter()) {
-                if let Some(path) = self.path_cache.get(&GlyphId(info.glyph_id as _)) {
-                    let transform = Transform::translation(
-                        x + pos.x_offset as f32,
-                        y + pos.y_offset as f32 - self.face_descender,
-                    )
-                    .then_scale(scale, scale);
+                        tess.tessellate_path(
+                            &*path,
+                            &FillOptions::default().with_tolerance(0.01),
+                            &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
+                                position: v.position().to_array(),
+                                line_no,
+                                transform: transform.to_arrays(),
+                            }),
+                        )
+                        .unwrap();
+                    }
 
-                    tess.tessellate_path(
-                        &*path,
-                        &FillOptions::default().with_tolerance(0.008),
-                        &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
-                            position: v.position().to_array(),
-                            line_no,
-                            transform: transform.to_arrays(),
-                        }),
-                    )
-                    .unwrap();
+                    x += pos.x_advance as f32;
+                    y += pos.y_advance as f32;
                 }
 
-                x += pos.x_advance as f32;
-                y += pos.y_advance as f32;
-            }
+                mesh
+            })
+            .collect();
 
-            buzz_buf = glyph_buf.clear();
-            line_str.clear();
-        }
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        meshes.into_iter().for_each(|mut m| {
+            m.indices
+                .par_iter_mut()
+                .for_each(|i| *i += vertices.len() as u32);
+            vertices.append(&mut m.vertices);
+            indices.append(&mut m.indices);
+        });
 
         self.vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            contents: bytemuck::cast_slice(&mesh.vertices),
+            contents: bytemuck::cast_slice(&vertices),
             label: Some("lyon vertex"),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
         self.index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            contents: bytemuck::cast_slice(&mesh.indices),
+            contents: bytemuck::cast_slice(&indices),
             label: Some("lyon index"),
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        self.index_count = mesh.indices.len();
-
-        self.buzz_buf = Some(buzz_buf);
+        self.index_count = indices.len();
 
         let elapsed = start.elapsed();
 
         log::info!(
             "Tessellation complete in {}us, vertex: {}, index: {}",
             elapsed.as_micros(),
-            mesh.vertices.len(),
-            mesh.indices.len()
+            vertices.len(),
+            indices.len(),
+            // meshs.iter().map(|m| m.vertices.len()).sum::<usize>(),
+            // meshs.iter().map(|m| m.indices.len()).sum::<usize>(),
         );
     }
 

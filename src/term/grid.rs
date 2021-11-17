@@ -56,8 +56,8 @@ impl Terminal {
         self.cursor
     }
 
-    pub fn rows(&self) -> impl Iterator<Item = &Line> + ExactSizeIterator + '_ {
-        self.grid.iter()
+    pub fn rows(&self) -> &[Line] {
+        &self.grid
     }
 
     pub fn new_row(&mut self) {
