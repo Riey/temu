@@ -27,7 +27,7 @@ pub struct LyonContext {
     font_height: f32,
     face_descender: f32,
     buzz_buf: Option<UnicodeBuffer>,
-    path_cache: AHashMap<GlyphId, Option<Path>>,
+    path_cache: AHashMap<GlyphId, Path>,
 }
 
 impl LyonContext {
@@ -39,6 +39,21 @@ impl LyonContext {
         font_height: f32,
     ) -> Self {
         let face = Face::from_slice(super::FONT, 0).unwrap();
+
+        let mut path_cache = AHashMap::new();
+        for subtable in face.character_mapping_subtables() {
+            subtable.codepoints(|c| {
+                if let Some(id) = subtable.glyph_index(c) {
+                    let mut builder = LyonBuilder {
+                        builder: Builder::new(),
+                    };
+                    if face.outline_glyph(id, &mut builder).is_some() {
+                        path_cache.insert(id, builder.builder.build());
+                    }
+                }
+            })
+        }
+
         let m = face.glyph_index('M').unwrap();
         let h_advance = face.glyph_hor_advance(m).unwrap();
         let face_width = h_advance as f32;
@@ -106,7 +121,7 @@ impl LyonContext {
             font_height,
             font_width,
             face_descender,
-            path_cache: AHashMap::with_capacity(500),
+            path_cache,
             buzz_buf: Some(UnicodeBuffer::new()),
         }
     }
@@ -144,19 +159,7 @@ impl LyonContext {
             let mut y = 0.0;
 
             for (pos, info) in positions.iter().zip(infos.iter()) {
-                let face = &self.face;
-                let path = self
-                    .path_cache
-                    .entry(GlyphId(info.glyph_id as _))
-                    .or_insert_with_key(|id| {
-                        let mut builder = LyonBuilder {
-                            builder: Builder::new(),
-                        };
-                        face.outline_glyph(*id, &mut builder)?;
-                        Some(builder.builder.build())
-                    });
-
-                if let Some(path) = path {
+                if let Some(path) = self.path_cache.get(&GlyphId(info.glyph_id as _)) {
                     let transform = Transform::translation(
                         x + pos.x_offset as f32,
                         y + pos.y_offset as f32 - self.face_descender,
