@@ -3,15 +3,11 @@ mod lyon;
 mod scroll;
 mod viewport;
 
-use std::{
-    mem::size_of,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 pub use self::viewport::Viewport;
 use self::{cell::CellContext, lyon::LyonContext, scroll::ScrollState};
-use crate::term::{SharedTerminal, Terminal};
+use crate::term::DrawCommand;
 use crossbeam_channel::Receiver;
 use futures_executor::block_on;
 use temu_window::TemuEvent;
@@ -151,16 +147,6 @@ impl WgpuContext {
         }
     }
 
-    pub fn update_terminal(&mut self, term: &Terminal) {
-        let cursor_pos = (term.cursor().0 + term.cursor().1 * 100) * size_of::<CellInfo>();
-        self.next_curosr_pos = if self.prev_cursor_pos == cursor_pos {
-            None
-        } else {
-            Some(cursor_pos)
-        };
-        self.lyon_ctx.set_draw(&self.device, term);
-    }
-
     pub fn resize(&mut self, width: u32, height: u32) {
         // TODO: update scroll_state
 
@@ -241,7 +227,7 @@ pub fn run(
     height: u32,
     scale_factor: f32,
     event_rx: Receiver<TemuEvent>,
-    shared_terminal: Arc<SharedTerminal>,
+    term_rx: Receiver<DrawCommand>,
 ) {
     let mut need_redraw = true;
 
@@ -280,9 +266,19 @@ pub fn run(
             }
         }
 
-        if let Some(term) = shared_terminal.take_terminal() {
-            ctx.update_terminal(&term);
-            need_redraw = true;
+        loop {
+            match term_rx.try_recv() {
+                Ok(command) => {
+                    ctx.lyon_ctx.update_draw(command, &ctx.device);
+                    need_redraw = true;
+                }
+                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                    return;
+                }
+                Err(crossbeam_channel::TryRecvError::Empty) => {
+                    break;
+                }
+            }
         }
 
         match event_rx.try_recv() {

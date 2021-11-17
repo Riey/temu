@@ -1,3 +1,5 @@
+use arrayvec::ArrayVec;
+use crossbeam_channel::Sender;
 use termwiz::escape::{
     csi::{
         Cursor, DecPrivateMode, DecPrivateModeCode, Edit, EraseInDisplay, EraseInLine, Mode,
@@ -6,7 +8,9 @@ use termwiz::escape::{
     Action, ControlCode, CSI,
 };
 
-#[derive(Clone, Copy, Debug)]
+use super::DrawCommand;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cell {
     ch: char,
 }
@@ -17,15 +21,15 @@ impl Cell {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
-    raw: Vec<Cell>,
+    raw: ArrayVec<Cell, 128>,
 }
 
 impl Line {
     pub fn new(col: usize) -> Self {
         Self {
-            raw: vec![Cell::new(' '); col],
+            raw: ArrayVec::from_iter(std::iter::repeat(Cell::new(' ')).take(col)),
         }
     }
 
@@ -44,6 +48,43 @@ pub struct Terminal {
 }
 
 impl Terminal {
+    pub fn diff(
+        &self,
+        prev: &Self,
+        tx: &Sender<DrawCommand>,
+    ) -> Result<(), crossbeam_channel::SendError<DrawCommand>> {
+        if prev.column != self.column {
+            tx.send(DrawCommand::Clear)?;
+            for (no, l) in self.rows().iter().enumerate() {
+                tx.send(DrawCommand::Draw(no, l.clone()))?;
+            }
+        } else {
+            let prev_lines = prev.rows().iter();
+            let cur_lines = self.rows().iter();
+
+            for (no, (prev, cur)) in prev_lines.zip(cur_lines).enumerate() {
+                if prev != cur {
+                    tx.send(DrawCommand::Draw(no, cur.clone()))?;
+                }
+            }
+
+            match self.rows().len().checked_sub(prev.rows().len()) {
+                Some(_) => {
+                    for (no, new_line) in self.rows()[prev.rows().len()..].iter().enumerate() {
+                        tx.send(DrawCommand::Draw(no + prev.rows().len(), new_line.clone()))?;
+                    }
+                }
+                None => {
+                    for no in self.rows().len()..prev.rows().len() {
+                        tx.send(DrawCommand::DeleteLine(no))?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn new(column: usize) -> Self {
         Self {
             grid: vec![Line::new(column)],
@@ -141,9 +182,11 @@ impl Terminal {
             Action::Control(ControlCode::CarriageReturn) => self.cr(),
             // TODO: style
             Action::CSI(CSI::Edit(Edit::EraseInDisplay(EraseInDisplay::EraseToEndOfDisplay))) => {
+                log::info!("Erase");
                 self.erase_all();
             }
             Action::CSI(CSI::Edit(Edit::EraseInDisplay(EraseInDisplay::EraseDisplay))) => {
+                log::info!("Erase");
                 self.erase_all();
             }
             Action::CSI(CSI::Edit(Edit::EraseInLine(EraseInLine::EraseToEndOfLine))) => {

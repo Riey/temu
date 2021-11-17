@@ -2,7 +2,6 @@ use std::time::Instant;
 
 use ahash::AHashMap;
 use bytemuck::{Pod, Zeroable};
-use dashmap::{mapref::entry::Entry, DashMap};
 use lyon::{
     geom::{Point, Transform},
     lyon_tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers},
@@ -14,7 +13,7 @@ use std::sync::Arc;
 use ttf_parser::GlyphId;
 use wgpu::util::{DeviceExt, RenderEncoder};
 
-use crate::term::Terminal;
+use crate::term::{DrawCommand, Terminal};
 
 use super::Viewport;
 
@@ -27,7 +26,7 @@ struct LineInfo {
 }
 
 pub struct LyonContext {
-    lines: Vec<Arc<LineInfo>>,
+    lines: AHashMap<usize, Arc<LineInfo>>,
     vertex_cache: AHashMap<String, Arc<LineInfo>>,
     pipeline: wgpu::RenderPipeline,
     face: Face<'static>,
@@ -35,6 +34,7 @@ pub struct LyonContext {
     font_height: f32,
     face_descender: f32,
     path_cache: AHashMap<GlyphId, Path>,
+    scale: f32,
 }
 
 impl LyonContext {
@@ -106,8 +106,9 @@ impl LyonContext {
         });
 
         Self {
+            scale: 1.0 / face.units_per_em() as f32,
             face,
-            lines: Vec::new(),
+            lines: Default::default(),
             vertex_cache: Default::default(),
             pipeline,
             font_height,
@@ -125,83 +126,90 @@ impl LyonContext {
         self.font_width
     }
 
-    pub fn set_draw(&mut self, device: &wgpu::Device, term: &Terminal) {
-        let start = Instant::now();
+    pub fn update_draw(&mut self, command: DrawCommand, device: &wgpu::Device) {
+        match command {
+            DrawCommand::DeleteLine(no) => {
+                log::info!("Delete {}", no);
+                self.lines.remove(&no);
+            }
+            DrawCommand::Clear => {
+                log::info!("Clear all");
+                self.lines.clear();
+            }
+            DrawCommand::Draw(no, line) => {
+                log::info!("Draw {}", no);
+                let line_no = no as f32;
+                let mut line_str = String::new();
+                line.write_text(&mut line_str);
 
-        self.lines.clear();
+                let info = self
+                    .vertex_cache
+                    .entry(line_str)
+                    .or_insert_with_key(|key| {
+                        let mut tess = FillTessellator::new();
+                        let mut mesh = VertexBuffers::<LyonVertex, u32>::new();
+                        let mut buzz_buf = UnicodeBuffer::new();
+                        let line_no = line_no as f32;
+                        buzz_buf.push_str(key);
 
-        let scale = 1.0 / self.face.units_per_em() as f32;
+                        let glyph_buf = rustybuzz::shape(&self.face, &[], buzz_buf);
 
-        let lines = term.rows().iter().enumerate().map(|(line_no, line)| {
-            let mut line_str = String::new();
-            line.write_text(&mut line_str);
+                        let positions = glyph_buf.glyph_positions();
+                        let infos = glyph_buf.glyph_infos();
 
-            self.vertex_cache
-                .entry(line_str)
-                .or_insert_with_key(|key| {
-                    let mut tess = FillTessellator::new();
-                    let mut mesh = VertexBuffers::<LyonVertex, u32>::new();
-                    let mut buzz_buf = UnicodeBuffer::new();
-                    let line_no = line_no as f32;
-                    buzz_buf.push_str(key);
+                        let mut x = 0.0;
+                        let mut y = 0.0;
 
-                    let glyph_buf = rustybuzz::shape(&self.face, &[], buzz_buf);
+                        for (pos, info) in positions.iter().zip(infos.iter()) {
+                            if let Some(path) = self.path_cache.get(&GlyphId(info.glyph_id as _)) {
+                                let transform = Transform::translation(
+                                    x + pos.x_offset as f32,
+                                    y + pos.y_offset as f32 - self.face_descender,
+                                )
+                                .then_scale(self.scale, self.scale);
 
-                    let positions = glyph_buf.glyph_positions();
-                    let infos = glyph_buf.glyph_infos();
+                                tess.tessellate_path(
+                                    &*path,
+                                    &FillOptions::default().with_tolerance(0.01),
+                                    &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| {
+                                        LyonVertex {
+                                            position: v.position().to_array(),
+                                            line_no,
+                                            transform: transform.to_arrays(),
+                                        }
+                                    }),
+                                )
+                                .unwrap();
+                            }
 
-                    let mut x = 0.0;
-                    let mut y = 0.0;
-
-                    for (pos, info) in positions.iter().zip(infos.iter()) {
-                        if let Some(path) = self.path_cache.get(&GlyphId(info.glyph_id as _)) {
-                            let transform = Transform::translation(
-                                x + pos.x_offset as f32,
-                                y + pos.y_offset as f32 - self.face_descender,
-                            )
-                            .then_scale(scale, scale);
-
-                            tess.tessellate_path(
-                                &*path,
-                                &FillOptions::default().with_tolerance(0.01),
-                                &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
-                                    position: v.position().to_array(),
-                                    line_no,
-                                    transform: transform.to_arrays(),
-                                }),
-                            )
-                            .unwrap();
+                            x += pos.x_advance as f32;
+                            y += pos.y_advance as f32;
                         }
 
-                        x += pos.x_advance as f32;
-                        y += pos.y_advance as f32;
-                    }
+                        let vertex_buf =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                contents: bytemuck::cast_slice(&mesh.vertices),
+                                label: Some("lyon vertex"),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
 
-                    let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        contents: bytemuck::cast_slice(&mesh.vertices),
-                        label: Some("lyon vertex"),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-
-                    let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        contents: bytemuck::cast_slice(&mesh.indices),
-                        label: Some("lyon index"),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
-                    Arc::new(LineInfo {
-                        index_count: mesh.indices.len(),
-                        index_buf,
-                        vertex_buf,
+                        let index_buf =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                contents: bytemuck::cast_slice(&mesh.indices),
+                                label: Some("lyon index"),
+                                usage: wgpu::BufferUsages::INDEX,
+                            });
+                        Arc::new(LineInfo {
+                            index_count: mesh.indices.len(),
+                            index_buf,
+                            vertex_buf,
+                        })
                     })
-                })
-                .clone()
-        });
+                    .clone();
 
-        self.lines.extend(lines);
-
-        let elapsed = start.elapsed();
-
-        log::info!("Tessellation complete in {}us", elapsed.as_micros(),);
+                self.lines.insert(no, info);
+            }
+        }
     }
 
     pub fn draw<'a>(&'a self, rpass: &mut impl RenderEncoder<'a>) {
@@ -211,7 +219,7 @@ impl LyonContext {
 
         rpass.set_pipeline(&self.pipeline);
 
-        for l in self.lines.iter() {
+        for l in self.lines.values() {
             rpass.set_vertex_buffer(0, l.vertex_buf.slice(..));
             rpass.set_index_buffer(l.index_buf.slice(..), wgpu::IndexFormat::Uint32);
             rpass.draw_indexed(0..l.index_count as u32, 0, 0..1);

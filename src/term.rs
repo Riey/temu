@@ -15,44 +15,19 @@ use crossbeam_channel::{Receiver, Sender};
 
 use temu_window::{TemuEvent, TemuPtyEvent};
 
-pub use self::grid::{Cell, Terminal};
+pub use self::grid::{Cell, Line, Terminal};
 
-pub struct SharedTerminal {
-    terminal: Mutex<Option<Terminal>>,
-    changed: AtomicBool,
-}
-
-impl SharedTerminal {
-    pub fn new() -> Self {
-        Self {
-            terminal: Mutex::new(None),
-            changed: AtomicBool::new(false),
-        }
-    }
-
-    pub fn take_terminal(&self) -> Option<Terminal> {
-        if self.changed.swap(false, Ordering::Acquire) {
-            self.terminal.lock().take()
-        } else {
-            None
-        }
-    }
-
-    pub fn try_update_terminal(&self, terminal: &Terminal) -> bool {
-        if let Some(mut lock) = self.terminal.try_lock() {
-            *lock = Some(terminal.clone());
-            self.changed.store(true, Ordering::Release);
-            true
-        } else {
-            false
-        }
-    }
+#[derive(Clone, Debug)]
+pub enum DrawCommand {
+    Draw(usize, Line),
+    DeleteLine(usize),
+    Clear,
 }
 
 pub fn run(
     _event_tx: Sender<TemuEvent>,
     pty_event_rx: Receiver<TemuPtyEvent>,
-    shared_terminal: Arc<SharedTerminal>,
+    term_tx: Sender<DrawCommand>,
 ) {
     let (master, _shell) = start_pty();
 
@@ -75,15 +50,19 @@ pub fn run(
 
     log::info!("pty started");
 
-    let mut need_update = false;
     let mut buffer = [0; 65536];
     let mut grid = Terminal::new(100);
+    let mut last_grid = grid.clone();
     let mut parser = Parser::new();
+    let mut need_update = true;
 
     loop {
         if need_update {
-            need_update = shared_terminal.try_update_terminal(&grid);
+            grid.diff(&last_grid, &term_tx).unwrap();
+            last_grid = grid.clone();
+            need_update = false;
         }
+
         match input.read(&mut buffer) {
             Ok(0) => break,
             Ok(len) => {
