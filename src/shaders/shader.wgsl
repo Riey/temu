@@ -2,7 +2,6 @@
 struct WindowSizeUniform {
     size: vec2<f32>;
     cell_size: vec2<f32>;
-    texture_count: vec2<u32>;
     column: u32;
 };
 
@@ -10,7 +9,7 @@ struct WindowSizeUniform {
 [[group(0), binding(1)]] var font_texture: texture_2d_array<f32>;
 [[group(0), binding(2)]] var font_sampler: sampler;
 
-let TEXTURE_WIDTH: f32 = 2048.0;
+let TEXTURE_WIDTH: f32 = 1024.0;
 
 struct CellInput {
     [[builtin(vertex_index)]] vertex_index: u32;
@@ -26,9 +25,10 @@ struct CellOutput {
 struct TextInput {
     [[builtin(vertex_index)]] vertex_index: u32;
     [[location(0)]] position: vec2<f32>;
-    [[location(1)]] tex_size: vec2<f32>;
-    [[location(2)]] color: vec3<f32>;
-    [[location(3)]] glyph_id: u32;
+    [[location(1)]] tex_position: vec2<f32>;
+    [[location(2)]] tex_size: vec2<f32>;
+    [[location(3)]] color: vec3<f32>;
+    [[location(4)]] layer: i32;
 };
 
 struct TextOutput {
@@ -65,20 +65,6 @@ fn calculate_cell_rect(cell_index: u32) -> Rect {
     let begin = (vec2<f32>(f32(column), f32(row)) * window_size.cell_size);
 
     return Rect(pixel_to_ndc(begin), pixel_size_to_ndc(window_size.cell_size));
-}
-
-fn calculate_tex_rect(glyph_id: u32, tex_size: vec2<f32>) -> TexRect {
-    let glyph_per_layer = window_size.texture_count.x * window_size.texture_count.y;
-    let layer = i32(glyph_id / glyph_per_layer);
-    let left = glyph_id % glyph_per_layer;
-
-    let row = left / window_size.texture_count.x;
-    let column = left % window_size.texture_count.x;
-
-    let begin = vec2<f32>(f32(column), f32(row)) * window_size.cell_size / TEXTURE_WIDTH;
-    let size = tex_size / TEXTURE_WIDTH;
-
-    return TexRect(Rect(begin, size), layer);
 }
 
 fn get_rect_position(rect: Rect, vertex_index: u32) -> vec2<f32> {
@@ -131,12 +117,12 @@ fn text_vs(
 ) -> TextOutput {
     let rect = Rect(pixel_to_ndc(model.position), pixel_size_to_ndc(model.tex_size));
 
-    let tex_rect = calculate_tex_rect(model.glyph_id, model.tex_size);
+    let tex_rect = Rect(model.tex_position / TEXTURE_WIDTH, model.tex_size / TEXTURE_WIDTH);
     let pos = get_rect_position(rect, model.vertex_index);
-    let tex_pos = get_rect_position(tex_rect.rect, model.vertex_index);
+    let tex_pos = get_rect_position(tex_rect, model.vertex_index);
     let color = model.color;
     // let color = colorful_color(model.vertex_index);
-    return TextOutput(vec4<f32>(pos, 1.0, 1.0), tex_pos, color, tex_rect.layer);
+    return TextOutput(vec4<f32>(pos, 1.0, 1.0), tex_pos, color, model.layer);
 }
 
 [[stage(fragment)]]

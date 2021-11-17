@@ -1,3 +1,4 @@
+mod atals;
 mod cell;
 mod viewport;
 
