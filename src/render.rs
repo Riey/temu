@@ -4,13 +4,14 @@ mod scroll;
 mod viewport;
 
 use std::{
+    mem::size_of,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 pub use self::viewport::Viewport;
 use self::{cell::CellContext, lyon::LyonContext, scroll::ScrollState};
-use crate::term::SharedTerminal;
+use crate::term::{SharedTerminal, Terminal};
 use crossbeam_channel::Receiver;
 use futures_executor::block_on;
 use temu_window::TemuEvent;
@@ -28,11 +29,14 @@ pub struct WgpuContext {
     cell_ctx: CellContext,
     lyon_ctx: LyonContext,
     window_size_buf: wgpu::Buffer,
+    cell_infos_buf: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     scroll_state: ScrollState,
     str_buf: String,
     msaa: wgpu::TextureView,
     next_resize: Option<(u32, u32)>,
+    prev_cursor_pos: usize,
+    next_curosr_pos: Option<usize>,
 }
 
 impl WgpuContext {
@@ -131,6 +135,7 @@ impl WgpuContext {
                 viewport.width(),
                 viewport.height(),
             ),
+            cell_infos_buf,
             lyon_ctx,
             cell_ctx: CellContext::new(&device, &viewport, &pipeline_layout),
             window_size_buf,
@@ -141,7 +146,20 @@ impl WgpuContext {
             next_resize: None,
             scroll_state,
             str_buf: String::new(),
+            prev_cursor_pos: 0,
+            next_curosr_pos: None,
         }
+    }
+
+    pub fn update_terminal(&mut self, term: &Terminal) {
+        log::info!("Update cursor: {:?}", term.cursor());
+        let cursor_pos = (term.cursor().0 + term.cursor().1 * 100) * size_of::<CellInfo>();
+        self.next_curosr_pos = if self.prev_cursor_pos == cursor_pos {
+            None
+        } else {
+            Some(cursor_pos)
+        };
+        self.lyon_ctx.set_draw(&self.device, term);
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -162,6 +180,21 @@ impl WgpuContext {
                 0,
                 bytemuck::cast_slice(&[width as f32, height as f32]),
             );
+        }
+
+        if let Some(next_cursor_pos) = self.next_curosr_pos.take() {
+            log::info!("Draw cursor {} -> {}", self.prev_cursor_pos, next_cursor_pos);
+            self.queue.write_buffer(
+                &self.cell_infos_buf,
+                self.prev_cursor_pos as u64,
+                bytemuck::cast_slice(&[CellInfo { color: [0.0; 4] }]),
+            );
+            self.queue.write_buffer(
+                &self.cell_infos_buf,
+                next_cursor_pos as u64,
+                bytemuck::cast_slice(&[CellInfo { color: [1.0; 4] }]),
+            );
+            self.prev_cursor_pos = next_cursor_pos;
         }
 
         let frame = match self.viewport.get_current_texture() {
@@ -249,8 +282,8 @@ pub fn run(
             }
         }
 
-        if let Some(terminal) = shared_terminal.take_terminal() {
-            ctx.lyon_ctx.set_draw(&ctx.device, &terminal);
+        if let Some(term) = shared_terminal.take_terminal() {
+            ctx.update_terminal(&term);
             need_redraw = true;
         }
 
