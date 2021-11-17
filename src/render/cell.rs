@@ -1,4 +1,4 @@
-use std::num::NonZeroU32;
+use std::{num::NonZeroU32, time::Instant};
 
 use bytemuck::{Pod, Zeroable};
 use fontdue::{
@@ -202,6 +202,7 @@ impl CellContext {
 
         let mut data = vec![0u8; TEXTURE_SIZE * layer_count as usize];
 
+        let init_start = Instant::now();
         data.par_chunks_exact_mut(TEXTURE_SIZE)
             .enumerate()
             .for_each(|(layer, page)| {

@@ -1,5 +1,10 @@
-use std::iter;
-use termwiz::escape::{Action, CSI, ControlCode, OneBased, csi::{Cursor, DecPrivateMode, DecPrivateModeCode, Edit, EraseInDisplay, EraseInLine, Mode, TerminalMode, TerminalModeCode}};
+use termwiz::escape::{
+    csi::{
+        Cursor, DecPrivateMode, DecPrivateModeCode, Edit, EraseInDisplay, EraseInLine, Mode,
+        TerminalMode, TerminalModeCode,
+    },
+    Action, ControlCode, CSI,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Cell {
@@ -194,6 +199,7 @@ impl Terminal {
 
 #[test]
 fn grid() {
+    use termwiz::escape::OneBased;
     let mut grid = Terminal::new(10);
     grid.perform_action(Action::CSI(CSI::Cursor(Cursor::Position {
         col: OneBased::from_zero_based(0),

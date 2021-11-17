@@ -8,10 +8,9 @@ use std::{
 
 use self::cell::CellContext;
 pub use self::viewport::Viewport;
-use crate::term::{SharedTerminal, Terminal};
+use crate::term::SharedTerminal;
 use crossbeam_channel::Receiver;
-use futures_executor::{block_on, LocalPool, LocalSpawner};
-use futures_task::{LocalFutureObj, LocalSpawn};
+use futures_executor::block_on;
 use temu_window::TemuEvent;
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
@@ -24,7 +23,6 @@ pub struct WgpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
     cell_ctx: CellContext,
-    staging_belt: wgpu::util::StagingBelt,
     scroll_state: ScrollState,
     str_buf: String,
 }
@@ -46,7 +44,6 @@ impl WgpuContext {
         Self {
             cell_ctx,
             viewport,
-            staging_belt: wgpu::util::StagingBelt::new(1024),
             device,
             queue,
             scroll_state,
@@ -62,7 +59,7 @@ impl WgpuContext {
         // TODO: update scroll_state
     }
 
-    pub fn redraw(&mut self, spawner: &LocalSpawner) {
+    pub fn redraw(&mut self) {
         let start = Instant::now();
 
         let frame = match self.viewport.get_current_texture() {
@@ -94,12 +91,8 @@ impl WgpuContext {
             self.cell_ctx.draw(&mut rpass);
         }
 
-        self.staging_belt.finish();
         self.queue.submit(Some(encoder.finish()));
         frame.present();
-        spawner
-            .spawn_local_obj(LocalFutureObj::new(Box::new(self.staging_belt.recall())))
-            .unwrap();
 
         let end = start.elapsed();
 
@@ -116,9 +109,6 @@ pub fn run(
     event_rx: Receiver<TemuEvent>,
     shared_terminal: Arc<SharedTerminal>,
 ) {
-    let mut local_pool = LocalPool::new();
-    let local_spawner = local_pool.spawner();
-
     let mut need_redraw = true;
 
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -150,15 +140,15 @@ pub fn run(
             let now = Instant::now();
 
             if now >= next_render_time {
-                ctx.redraw(&local_spawner);
-                local_pool.run_until_stalled();
+                ctx.redraw();
                 need_redraw = false;
                 next_render_time = now + FRAMETIME;
             }
         }
 
         if let Some(terminal) = shared_terminal.take_terminal() {
-            ctx.cell_ctx.set_terminal(&ctx.device, &ctx.queue, &terminal);
+            ctx.cell_ctx
+                .set_terminal(&ctx.device, &ctx.queue, &terminal);
             need_redraw = true;
         }
 

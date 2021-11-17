@@ -1564,7 +1564,6 @@ dependencies = [
  "fontdue",
  "fps_counter",
  "futures-executor",
- "futures-task",
  "log",
  "parking_lot",
  "portable-pty",
