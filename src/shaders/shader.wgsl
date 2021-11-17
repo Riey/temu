@@ -25,12 +25,10 @@ struct CellOutput {
 
 struct TextInput {
     [[builtin(vertex_index)]] vertex_index: u32;
-    // [[builtin(instance_index)]] cell_index: u32;
-    [[location(0)]] base_cell_index: u32;
-    [[location(1)]] offset: vec2<f32>;
-    [[location(2)]] tex_size: vec2<f32>;
-    [[location(3)]] color: vec3<f32>;
-    [[location(4)]] glyph_id: u32;
+    [[location(0)]] position: vec2<f32>;
+    [[location(1)]] tex_size: vec2<f32>;
+    [[location(2)]] color: vec3<f32>;
+    [[location(3)]] glyph_id: u32;
 };
 
 struct TextOutput {
@@ -60,11 +58,11 @@ fn pixel_size_to_ndc(size: vec2<f32>) -> vec2<f32> {
     return vec2<f32>(size.x, -size.y);
 }
 
-fn calculate_cell_rect(cell_index: u32, offset: vec2<f32>) -> Rect {
+fn calculate_cell_rect(cell_index: u32) -> Rect {
     let row: u32 = cell_index / window_size.column;
     let column: u32 = cell_index % window_size.column;
 
-    let begin = (vec2<f32>(f32(column), f32(row)) * window_size.cell_size + offset);
+    let begin = (vec2<f32>(f32(column), f32(row)) * window_size.cell_size);
 
     return Rect(pixel_to_ndc(begin), pixel_size_to_ndc(window_size.cell_size));
 }
@@ -116,7 +114,7 @@ fn colorful_color(vertex_index: u32) -> vec4<f32> {
 fn cell_vs(
     model: CellInput,
 ) -> CellOutput {
-    let rect = calculate_cell_rect(model.cell_index, vec2<f32>(0.0));
+    let rect = calculate_cell_rect(model.cell_index);
     let color = colorful_color(model.vertex_index);
     return CellOutput(vec4<f32>(get_rect_position(rect, model.vertex_index), 1.0, 1.0), color);
 }
@@ -130,8 +128,7 @@ fn cell_fs(in: CellOutput) -> [[location(0)]] vec4<f32> {
 fn text_vs(
     model: TextInput,
 ) -> TextOutput {
-    var rect = calculate_cell_rect(model.base_cell_index, model.offset);
-    rect.size = pixel_size_to_ndc(model.tex_size);
+    let rect = Rect(pixel_to_ndc(model.position), pixel_size_to_ndc(model.tex_size));
 
     let tex_rect = calculate_tex_rect(model.glyph_id, model.tex_size);
     let pos = get_rect_position(rect, model.vertex_index);

@@ -132,11 +132,10 @@ impl CellContext {
                     array_stride: std::mem::size_of::<TextVertex>() as _,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
-                        0 => Uint32,
+                        0 => Float32x2,
                         1 => Float32x2,
-                        2 => Float32x2,
-                        3 => Float32x3,
-                        4 => Uint32,
+                        2 => Float32x3,
+                        3 => Uint32,
                     ],
                 }],
             },
@@ -328,12 +327,10 @@ impl CellContext {
             t.clear();
         }
 
-        let base_cell_index = 0;
         let vertexes = layout
             .glyphs()
             .par_iter()
             .map(|g| TextVertex {
-                base_cell_index,
                 offset: [g.x, g.y],
                 tex_size: [g.width as f32, g.height as f32],
                 color: [1.0, 1.0, 1.0],
@@ -379,7 +376,6 @@ struct CellVertex {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct TextVertex {
-    base_cell_index: u32,
     offset: [f32; 2],
     tex_size: [f32; 2],
     color: [f32; 3],

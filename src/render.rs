@@ -63,6 +63,8 @@ impl WgpuContext {
     }
 
     pub fn redraw(&mut self, spawner: &LocalSpawner) {
+        let start = Instant::now();
+
         let frame = match self.viewport.get_current_texture() {
             Some(frame) => frame,
             None => return,
@@ -98,6 +100,10 @@ impl WgpuContext {
         spawner
             .spawn_local_obj(LocalFutureObj::new(Box::new(self.staging_belt.recall())))
             .unwrap();
+
+        let end = start.elapsed();
+
+        log::info!("Redraw elapsed: {}us", end.as_micros());
     }
 }
 
