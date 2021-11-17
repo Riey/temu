@@ -6,7 +6,7 @@ members = [
 [package]
 name = "temu"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 resolver = "2"
 
 [dependencies]
@@ -31,6 +31,7 @@ rustybuzz = "0.4.0"
 ttf-parser = "0.12"
 ahash = "0.7.6"
 rayon = "1.5.1"
+dashmap = "4.0.2"
 
 [features]
 

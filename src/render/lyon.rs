@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use ahash::AHashMap;
 use bytemuck::{Pod, Zeroable};
+use dashmap::{mapref::entry::Entry, DashMap};
 use lyon::{
     geom::{Point, Transform},
     lyon_tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers},
@@ -9,6 +10,7 @@ use lyon::{
 };
 use rayon::prelude::*;
 use rustybuzz::{Face, UnicodeBuffer};
+use std::sync::Arc;
 use ttf_parser::GlyphId;
 use wgpu::util::{DeviceExt, RenderEncoder};
 
@@ -18,10 +20,15 @@ use super::Viewport;
 
 const SAMPLE_COUNT: u32 = 4;
 
-pub struct LyonContext {
+struct LineInfo {
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     index_count: usize,
+}
+
+pub struct LyonContext {
+    lines: Vec<Arc<LineInfo>>,
+    vertex_cache: AHashMap<String, Arc<LineInfo>>,
     pipeline: wgpu::RenderPipeline,
     face: Face<'static>,
     font_width: f32,
@@ -98,25 +105,10 @@ impl LyonContext {
             },
         });
 
-        let vertex_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Lyon vertex buffer"),
-            size: 0,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let index_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Lyon vertex buffer"),
-            size: 0,
-            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
         Self {
             face,
-            index_buf,
-            vertex_buf,
-            index_count: 0,
+            lines: Vec::new(),
+            vertex_cache: Default::default(),
             pipeline,
             font_height,
             font_width,
@@ -136,103 +128,94 @@ impl LyonContext {
     pub fn set_draw(&mut self, device: &wgpu::Device, term: &Terminal) {
         let start = Instant::now();
 
+        self.lines.clear();
+
         let scale = 1.0 / self.face.units_per_em() as f32;
 
-        let meshes: Vec<_> = term
-            .rows()
-            .par_iter()
-            .enumerate()
-            .map(|(line_no, line)| {
-                let mut tess = FillTessellator::new();
-                let mut mesh = VertexBuffers::<LyonVertex, u32>::new();
-                let mut buzz_buf = UnicodeBuffer::new();
-                let mut line_str = String::new();
-                let line_no = line_no as f32;
-                line.write_text(&mut line_str);
-                buzz_buf.push_str(&line_str);
+        let lines = term.rows().iter().enumerate().map(|(line_no, line)| {
+            let mut line_str = String::new();
+            line.write_text(&mut line_str);
 
-                let glyph_buf = rustybuzz::shape(&self.face, &[], buzz_buf);
+            self.vertex_cache
+                .entry(line_str)
+                .or_insert_with_key(|key| {
+                    let mut tess = FillTessellator::new();
+                    let mut mesh = VertexBuffers::<LyonVertex, u32>::new();
+                    let mut buzz_buf = UnicodeBuffer::new();
+                    let line_no = line_no as f32;
+                    buzz_buf.push_str(key);
 
-                let positions = glyph_buf.glyph_positions();
-                let infos = glyph_buf.glyph_infos();
+                    let glyph_buf = rustybuzz::shape(&self.face, &[], buzz_buf);
 
-                let mut x = 0.0;
-                let mut y = 0.0;
+                    let positions = glyph_buf.glyph_positions();
+                    let infos = glyph_buf.glyph_infos();
 
-                for (pos, info) in positions.iter().zip(infos.iter()) {
-                    if let Some(path) = self.path_cache.get(&GlyphId(info.glyph_id as _)) {
-                        let transform = Transform::translation(
-                            x + pos.x_offset as f32,
-                            y + pos.y_offset as f32 - self.face_descender,
-                        )
-                        .then_scale(scale, scale);
+                    let mut x = 0.0;
+                    let mut y = 0.0;
 
-                        tess.tessellate_path(
-                            &*path,
-                            &FillOptions::default().with_tolerance(0.01),
-                            &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
-                                position: v.position().to_array(),
-                                line_no,
-                                transform: transform.to_arrays(),
-                            }),
-                        )
-                        .unwrap();
+                    for (pos, info) in positions.iter().zip(infos.iter()) {
+                        if let Some(path) = self.path_cache.get(&GlyphId(info.glyph_id as _)) {
+                            let transform = Transform::translation(
+                                x + pos.x_offset as f32,
+                                y + pos.y_offset as f32 - self.face_descender,
+                            )
+                            .then_scale(scale, scale);
+
+                            tess.tessellate_path(
+                                &*path,
+                                &FillOptions::default().with_tolerance(0.01),
+                                &mut BuffersBuilder::new(&mut mesh, |v: FillVertex| LyonVertex {
+                                    position: v.position().to_array(),
+                                    line_no,
+                                    transform: transform.to_arrays(),
+                                }),
+                            )
+                            .unwrap();
+                        }
+
+                        x += pos.x_advance as f32;
+                        y += pos.y_advance as f32;
                     }
 
-                    x += pos.x_advance as f32;
-                    y += pos.y_advance as f32;
-                }
+                    let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        contents: bytemuck::cast_slice(&mesh.vertices),
+                        label: Some("lyon vertex"),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
 
-                mesh
-            })
-            .collect();
-
-        let mut vertices = Vec::new();
-        let mut indices = Vec::new();
-
-        meshes.into_iter().for_each(|mut m| {
-            m.indices
-                .par_iter_mut()
-                .for_each(|i| *i += vertices.len() as u32);
-            vertices.append(&mut m.vertices);
-            indices.append(&mut m.indices);
+                    let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        contents: bytemuck::cast_slice(&mesh.indices),
+                        label: Some("lyon index"),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+                    Arc::new(LineInfo {
+                        index_count: mesh.indices.len(),
+                        index_buf,
+                        vertex_buf,
+                    })
+                })
+                .clone()
         });
 
-        self.vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            contents: bytemuck::cast_slice(&vertices),
-            label: Some("lyon vertex"),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        self.index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            contents: bytemuck::cast_slice(&indices),
-            label: Some("lyon index"),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        self.index_count = indices.len();
+        self.lines.extend(lines);
 
         let elapsed = start.elapsed();
 
-        log::info!(
-            "Tessellation complete in {}us, vertex: {}, index: {}",
-            elapsed.as_micros(),
-            vertices.len(),
-            indices.len(),
-            // meshs.iter().map(|m| m.vertices.len()).sum::<usize>(),
-            // meshs.iter().map(|m| m.indices.len()).sum::<usize>(),
-        );
+        log::info!("Tessellation complete in {}us", elapsed.as_micros(),);
     }
 
     pub fn draw<'a>(&'a self, rpass: &mut impl RenderEncoder<'a>) {
-        if self.index_count == 0 {
+        if self.lines.is_empty() {
             return;
         }
 
         rpass.set_pipeline(&self.pipeline);
-        rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-        rpass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
-        rpass.draw_indexed(0..self.index_count as u32, 0, 0..1);
+
+        for l in self.lines.iter() {
+            rpass.set_vertex_buffer(0, l.vertex_buf.slice(..));
+            rpass.set_index_buffer(l.index_buf.slice(..), wgpu::IndexFormat::Uint32);
+            rpass.draw_indexed(0..l.index_count as u32, 0, 0..1);
+        }
     }
 }
 
