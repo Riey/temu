@@ -206,7 +206,7 @@ impl CellContext {
         //     data[i] = 255;
         // }
 
-        data.chunks_exact_mut(TEXTURE_SIZE)
+        data.par_chunks_exact_mut(TEXTURE_SIZE)
             .enumerate()
             .for_each(|(layer, page)| {
                 let glyph_id_base = (layer * (text_per_row * text_per_column) as usize) as u16;
@@ -322,7 +322,6 @@ impl CellContext {
             .glyphs()
             .iter()
             .map(|g| {
-                dbg!(g.parent, g.x, g.y, g.width, g.height);
                 TextVertex {
                     base_cell_index,
                     offset: [g.x, g.y],

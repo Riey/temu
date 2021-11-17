@@ -50,16 +50,23 @@ struct TexRect {
     layer: i32;
 };
 
+fn pixel_to_ndc(px: vec2<f32>) -> vec2<f32> {
+    let norm = px * 2.0 / window_size.size;
+    return vec2<f32>(norm.x - 1.0, 1.0 - norm.y);
+}
+
+fn pixel_size_to_ndc(size: vec2<f32>) -> vec2<f32> {
+    let size = size * 2.0 / window_size.size;
+    return vec2<f32>(size.x, -size.y);
+}
+
 fn calculate_cell_rect(cell_index: u32, offset: vec2<f32>) -> Rect {
     let row: u32 = cell_index / window_size.column;
     let column: u32 = cell_index % window_size.column;
 
-    let begin = (vec2<f32>(f32(column), f32(row)) * window_size.cell_size + offset) * 2.0 / window_size.size;
-    let begin = vec2<f32>(begin.x - 1.0, 1.0 - begin.y);
-    var size = window_size.cell_size * 2.0 / window_size.size;
-    size.y = -size.y;
+    let begin = (vec2<f32>(f32(column), f32(row)) * window_size.cell_size + offset);
 
-    return Rect(begin, size);
+    return Rect(pixel_to_ndc(begin), pixel_size_to_ndc(window_size.cell_size));
 }
 
 fn calculate_tex_rect(glyph_id: u32, tex_size: vec2<f32>) -> TexRect {
@@ -96,12 +103,22 @@ fn get_rect_position(rect: Rect, vertex_index: u32) -> vec2<f32> {
     return ret;
 }
 
+fn colorful_color(vertex_index: u32) -> vec4<f32> {
+    switch (vertex_index) {
+        case 0: { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
+        case 1: { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }
+        case 2: { return vec4<f32>(0.0, 0.0, 1.0, 1.0); }
+        default: { return vec4<f32>(1.0, 1.0, 1.0, 1.0); }
+    }
+}
+
 [[stage(vertex)]]
 fn cell_vs(
     model: CellInput,
 ) -> CellOutput {
     let rect = calculate_cell_rect(model.cell_index, vec2<f32>(0.0));
-    return CellOutput(vec4<f32>(get_rect_position(rect, model.vertex_index), 1.0, 1.0), model.color);
+    let color = colorful_color(model.vertex_index);
+    return CellOutput(vec4<f32>(get_rect_position(rect, model.vertex_index), 1.0, 1.0), color);
 }
 
 [[stage(fragment)]]
@@ -109,22 +126,12 @@ fn cell_fs(in: CellOutput) -> [[location(0)]] vec4<f32> {
     return in.color;
 }
 
-fn colorful_color(vertex_index: u32) -> vec3<f32> {
-    switch (vertex_index) {
-        case 0: { return vec3<f32>(1.0, 0.0, 0.0); }
-        case 1: { return vec3<f32>(0.0, 1.0, 0.0); }
-        case 2: { return vec3<f32>(0.0, 0.0, 1.0); }
-        default: { return vec3<f32>(1.0, 1.0, 1.0); }
-    }
-}
-
 [[stage(vertex)]]
 fn text_vs(
     model: TextInput,
 ) -> TextOutput {
     var rect = calculate_cell_rect(model.base_cell_index, model.offset);
-    rect.size = model.tex_size / window_size.size;
-    rect.size.y = -rect.size.y;
+    rect.size = pixel_size_to_ndc(model.tex_size);
 
     let tex_rect = calculate_tex_rect(model.glyph_id, model.tex_size);
     let pos = get_rect_position(rect, model.vertex_index);
