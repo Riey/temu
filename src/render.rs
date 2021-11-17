@@ -26,7 +26,6 @@ pub struct WgpuContext {
     cell_ctx: CellContext,
     staging_belt: wgpu::util::StagingBelt,
     scroll_state: ScrollState,
-    terminal: Terminal,
     str_buf: String,
 }
 
@@ -46,7 +45,6 @@ impl WgpuContext {
             device,
             queue,
             scroll_state,
-            terminal: Terminal::new(100),
             str_buf: String::new(),
         }
     }
@@ -141,7 +139,6 @@ pub fn run(
 
     let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
     let mut ctx = WgpuContext::new(viewport, device, queue);
-    ctx.cell_ctx.set_text(&ctx.queue, "Hello, world!");
     let mut next_render_time = Instant::now();
     const FPS: u64 = 60;
     const FRAMETIME: Duration = Duration::from_millis(1000 / FPS);
@@ -159,7 +156,7 @@ pub fn run(
         }
 
         if let Some(terminal) = shared_terminal.take_terminal() {
-            ctx.terminal = terminal;
+            ctx.cell_ctx.set_terminal(&ctx.device, &ctx.queue, &terminal);
             need_redraw = true;
         }
 

@@ -8,6 +8,8 @@ use fontdue::{
 use rayon::prelude::*;
 use wgpu::util::DeviceExt;
 
+use crate::term::Terminal;
+
 use super::Viewport;
 
 const TEXTURE_WIDTH: u32 = 2048;
@@ -202,10 +204,6 @@ impl CellContext {
 
         let mut data = vec![0u8; TEXTURE_SIZE * layer_count as usize];
 
-        // for i in 0..1024 * 20 {
-        //     data[i] = 255;
-        // }
-
         data.par_chunks_exact_mut(TEXTURE_SIZE)
             .enumerate()
             .for_each(|(layer, page)| {
@@ -315,16 +313,23 @@ impl CellContext {
         );
     }
 
-    pub fn set_text(&mut self, queue: &wgpu::Queue, text: &str) {
+    pub fn set_terminal(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, term: &Terminal) {
         let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
-        layout.append(
-            &[&self.font],
-            &TextStyle::new(text, super::FONT_SIZE as _, 0),
-        );
+        let mut t = String::new();
+
+        for line in term.rows() {
+            line.write_text(&mut t);
+            t.push('\n');
+
+            layout.append(&[&self.font], &TextStyle::new(&t, super::FONT_SIZE as _, 0));
+
+            t.clear();
+        }
+
         let base_cell_index = 0;
         let vertexes = layout
             .glyphs()
-            .iter()
+            .par_iter()
             .map(|g| TextVertex {
                 base_cell_index,
                 offset: [g.x, g.y],
@@ -333,7 +338,16 @@ impl CellContext {
                 glyph_id: g.key.glyph_index as u32,
             })
             .collect::<Vec<_>>();
-        queue.write_buffer(&self.text_instances, 0, bytemuck::cast_slice(&vertexes));
+        if self.text_instance_count >= vertexes.len() {
+            queue.write_buffer(&self.text_instances, 0, bytemuck::cast_slice(&vertexes));
+        } else {
+            self.text_instances = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("text instance"),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                contents: bytemuck::cast_slice(&vertexes),
+            });
+        }
+
         self.text_instance_count = vertexes.len();
     }
 

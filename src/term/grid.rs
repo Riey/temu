@@ -1,8 +1,5 @@
 use std::iter;
-use termwiz::escape::{
-    csi::{Cursor, Edit, EraseInDisplay, EraseInLine},
-    Action, ControlCode, OneBased, CSI,
-};
+use termwiz::escape::{Action, CSI, ControlCode, OneBased, csi::{Cursor, DecPrivateMode, DecPrivateModeCode, Edit, EraseInDisplay, EraseInLine, Mode, TerminalMode, TerminalModeCode}};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Cell {
@@ -149,6 +146,21 @@ impl Terminal {
                 for cell in self.grid[self.cursor.1].raw[self.cursor.0..].iter_mut() {
                     cell.ch = ' ';
                 }
+            }
+            Action::CSI(CSI::Mode(Mode::ResetMode(TerminalMode::Code(
+                TerminalModeCode::ShowCursor,
+            )))) => {
+                // MS show cursor
+            }
+            Action::CSI(CSI::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::ShowCursor,
+            )))) => {
+                // show cursor
+            }
+            Action::CSI(CSI::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::ShowCursor,
+            )))) => {
+                // hide cursor
             }
             Action::CSI(CSI::Sgr(_)) => {}
             Action::CSI(CSI::Cursor(Cursor::Position { col, line })) => {
