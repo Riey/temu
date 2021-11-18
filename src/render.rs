@@ -132,19 +132,11 @@ pub fn run(
 
     let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
     let mut ctx = WgpuContext::new(viewport, device, queue, scale_factor);
-    let mut next_render_time = Instant::now();
-    const FPS: u64 = 120;
-    const FRAMETIME: Duration = Duration::from_millis(1000 / FPS);
 
     loop {
         if need_redraw {
-            let now = Instant::now();
-
-            if now >= next_render_time {
-                ctx.redraw();
-                need_redraw = false;
-                next_render_time = now + FRAMETIME;
-            }
+            ctx.redraw();
+            need_redraw = false;
         }
 
         if let Some(terminal) = shared_terminal.take_terminal() {
@@ -179,7 +171,7 @@ pub fn run(
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {
                 if !need_redraw {
-                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
             }
         }
