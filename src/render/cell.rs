@@ -374,13 +374,19 @@ impl CellContext {
                 .builder(self.font)
                 .size(self.font_size)
                 .build();
-            shaper.add_str(&line.as_str());
+            let s = line.as_str();
+            shaper.add_str(&s);
+            let mut cells = line.cells();
+            let palette = term.get_config().color_palette();
 
             shaper.shape_with(|cluster| {
+                let (cluster_cells, new_cells) = cells.split_at(cluster.glyphs.len());
+                cells = new_cells;
                 assert!(!cluster.is_ligature());
                 // let s = &t[cluster.source.to_range()];
-                for glyph in cluster.glyphs {
+                for (glyph, cell) in cluster.glyphs.iter().zip(cluster_cells) {
                     if let Some(info) = self.glyph_cache.get(&glyph.id) {
+                        let (r, g, b, _) = palette.resolve_fg(cell.attrs().foreground()).to_tuple_rgba();
                         vertexes.push(TextVertex {
                             offset: [
                                 x + glyph.x + info.glyph_position[0],
@@ -389,7 +395,7 @@ impl CellContext {
                             ],
                             tex_offset: info.tex_position,
                             tex_size: info.tex_size,
-                            color: [1.0; 3],
+                            color:  [r, g, b],
                             layer: info.layer as i32,
                         });
                     }
