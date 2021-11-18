@@ -1,13 +1,10 @@
 mod grid;
 
-use parking_lot::Mutex;
+use crossbeam_utils::atomic::AtomicCell;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::{
     io::{self, Read, Write},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
 };
 use termwiz::escape::parser::Parser;
 
@@ -18,34 +15,22 @@ use temu_window::{TemuEvent, TemuPtyEvent};
 pub use self::grid::{Cell, Terminal};
 
 pub struct SharedTerminal {
-    terminal: Mutex<Option<Terminal>>,
-    changed: AtomicBool,
+    terminal: AtomicCell<Option<Terminal>>,
 }
 
 impl SharedTerminal {
     pub fn new() -> Self {
         Self {
-            terminal: Mutex::new(None),
-            changed: AtomicBool::new(false),
+            terminal: AtomicCell::new(None),
         }
     }
 
     pub fn take_terminal(&self) -> Option<Terminal> {
-        if self.changed.swap(false, Ordering::Acquire) {
-            self.terminal.lock().take()
-        } else {
-            None
-        }
+        self.terminal.take()
     }
 
-    pub fn try_update_terminal(&self, terminal: &Terminal) -> bool {
-        if let Some(mut lock) = self.terminal.try_lock() {
-            *lock = Some(terminal.clone());
-            self.changed.store(true, Ordering::Release);
-            true
-        } else {
-            false
-        }
+    pub fn update_terminal(&self, terminal: &Terminal) {
+        self.terminal.store(Some(terminal.clone()));
     }
 }
 
@@ -82,7 +67,8 @@ pub fn run(
 
     loop {
         if need_update {
-            need_update = shared_terminal.try_update_terminal(&grid);
+            shared_terminal.update_terminal(&grid);
+            need_update = false;
         }
         match input.read(&mut buffer) {
             Ok(0) => break,

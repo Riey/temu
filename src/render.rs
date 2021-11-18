@@ -38,7 +38,7 @@ impl WgpuContext {
         let mut scroll_state = ScrollState::new();
         scroll_state.page_size = 20;
         scroll_state.top = 10;
-        scroll_state.max = 50;
+        scroll_state.max = 100;
 
         let cell_ctx = CellContext::new(&device, &queue, &viewport, FONT_SIZE * scale_factor);
 

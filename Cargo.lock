@@ -1573,7 +1573,6 @@ dependencies = [
  "fps_counter",
  "futures-executor",
  "log",
- "parking_lot",
  "portable-pty",
  "rayon",
  "swash",
