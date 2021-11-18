@@ -77,7 +77,7 @@ pub fn run(
 
     let mut need_update = false;
     let mut buffer = [0; 65536];
-    let mut grid = Terminal::new(100);
+    let mut grid = Terminal::new(crate::COLUMN as _);
     let mut parser = Parser::new();
 
     loop {
@@ -110,8 +110,8 @@ fn start_pty() -> (Box<dyn MasterPty + Send>, Box<dyn Child + Send + Sync>) {
 
     let pair = pty
         .openpty(PtySize {
-            cols: super::COLUMN as _,
-            rows: 20,
+            cols: crate::COLUMN as _,
+            rows: crate::ROW as _,
             pixel_width: 0,
             pixel_height: 0,
         })

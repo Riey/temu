@@ -101,8 +101,8 @@ fn cell_vs(
     model: CellInput,
 ) -> CellOutput {
     let rect = calculate_cell_rect(model.cell_index);
-    let color = colorful_color(model.vertex_index);
-    // let color = model.color;
+    // let color = colorful_color(model.vertex_index);
+    let color = model.color;
     return CellOutput(vec4<f32>(get_rect_position(rect, model.vertex_index), 1.0, 1.0), color);
 }
 

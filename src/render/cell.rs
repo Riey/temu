@@ -1,4 +1,4 @@
-use std::{num::NonZeroU32, time::Instant};
+use std::{mem::size_of, num::NonZeroU32, time::Instant};
 
 use ahash::AHashMap;
 use bytemuck::{Pod, Zeroable};
@@ -29,11 +29,11 @@ pub struct CellContext {
     window_size_buf: wgpu::Buffer,
     font: FontRef<'static>,
     font_size: f32,
+    font_descent: f32,
+    cell_size: [f32; 2],
     glyph_cache: AHashMap<u16, GlyphInfo>,
-    text_texture: wgpu::Texture,
-    image: Image,
     shape_ctx: ShapeContext,
-    scale_ctx: ScaleContext,
+    prev_cursor: usize,
 }
 
 impl CellContext {
@@ -53,7 +53,7 @@ impl CellContext {
         let glyph_metrics = font.glyph_metrics(&[]).scale(font_size);
         dbg!(&metrics);
         let font_width = glyph_metrics.advance_width(font.charmap().map('M'));
-        let font_height = font_size;
+        let font_height = metrics.ascent + metrics.descent;
         let cell_size = [font_width, font_height];
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -315,8 +315,7 @@ impl CellContext {
 
         Self {
             shape_ctx,
-            scale_ctx,
-            image,
+            prev_cursor: 0,
             text_instances,
             text_instance_count: 0,
             instances,
@@ -324,11 +323,12 @@ impl CellContext {
             bind_group,
             glyph_cache,
             window_size_buf,
+            cell_size,
             font,
             font_size,
+            font_descent: metrics.descent,
             pipeline,
             text_pipeline,
-            text_texture: texture,
         }
     }
 
@@ -343,6 +343,19 @@ impl CellContext {
     pub fn set_terminal(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, term: &Terminal) {
         let mut t = String::new();
         let mut vertexes = Vec::new();
+
+        queue.write_buffer(
+            &self.instances,
+            self.prev_cursor as _,
+            bytemuck::cast_slice(&[CellVertex { color: [0.0; 4] }]),
+        );
+        let cursor = term.cursor_pos() * size_of::<CellVertex>();
+        self.prev_cursor = cursor;
+        queue.write_buffer(
+            &self.instances,
+            cursor as _,
+            bytemuck::cast_slice(&[CellVertex { color: [1.0; 4] }]),
+        );
 
         for (line_no, line) in term.rows().enumerate() {
             let mut x = 0.0;
@@ -362,8 +375,8 @@ impl CellContext {
                         vertexes.push(TextVertex {
                             offset: [
                                 x + glyph.x + info.glyph_position[0],
-                                self.font_size * (line_no + 1) as f32
-                                    - (info.glyph_position[1] + glyph.y),
+                                self.cell_size[1] * (line_no + 1) as f32
+                                    - (info.glyph_position[1] + glyph.y + self.font_descent),
                             ],
                             tex_offset: info.tex_position,
                             tex_size: info.tex_size,

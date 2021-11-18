@@ -56,6 +56,10 @@ impl Terminal {
         self.cursor
     }
 
+    pub fn cursor_pos(&self) -> usize {
+        self.cursor.0 + self.cursor.1 * self.column
+    }
+
     pub fn rows<'a>(&'a self) -> impl Iterator<Item = &'a Line> + ExactSizeIterator + 'a {
         self.grid.iter()
     }
@@ -206,10 +210,12 @@ fn grid() {
         line: OneBased::from_zero_based(0),
     })));
     assert_eq!(grid.cursor, (0, 0));
+    assert_eq!(grid.cursor_pos(), 0);
     grid.perform_action(Action::CSI(CSI::Cursor(Cursor::Position {
         col: OneBased::from_zero_based(0),
         line: OneBased::from_zero_based(5),
     })));
     assert_eq!(grid.grid.len(), 6);
     assert_eq!(grid.cursor, (0, 5));
+    assert_eq!(grid.cursor_pos(), 5 * grid.column);
 }
