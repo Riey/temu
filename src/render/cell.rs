@@ -4,7 +4,7 @@ use ahash::AHashMap;
 use bytemuck::{Pod, Zeroable};
 use rayon::prelude::*;
 use swash::{
-    scale::{image::Image, Render, ScaleContext, Source},
+    scale::{image::Image, Render, ScaleContext, Source, StrikeWith},
     shape::ShapeContext,
     FontRef,
 };
@@ -53,7 +53,7 @@ impl CellContext {
         let glyph_metrics = font.glyph_metrics(&[]).scale(font_size);
         dbg!(&metrics);
         let font_width = glyph_metrics.advance_width(font.charmap().map('M'));
-        let font_height = metrics.ascent + metrics.descent;
+        let font_height = font_size;
         let cell_size = [font_width, font_height];
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -197,9 +197,16 @@ impl CellContext {
 
         let mut scaler = scale_ctx.builder(font).size(font_size).build();
 
-        font.charmap().enumerate(|c, id| {
+        font.charmap().enumerate(|_c, id| {
             image.clear();
-            if Render::new(&[Source::Outline]).render_into(&mut scaler, id, &mut image) {
+            if Render::new(&[
+                Source::ColorBitmap(StrikeWith::BestFit),
+                Source::ColorOutline(0),
+                Source::Bitmap(StrikeWith::BestFit),
+                Source::Outline,
+            ])
+            .render_into(&mut scaler, id, &mut image)
+            {
                 if image.placement.width == 0 || image.placement.height == 0 {
                 } else {
                     let alloc = allocator.alloc(image.placement.width, image.placement.height);
@@ -348,6 +355,7 @@ impl CellContext {
             shaper.add_str(&t);
 
             shaper.shape_with(|cluster| {
+                assert!(!cluster.is_ligature());
                 // let s = &t[cluster.source.to_range()];
                 for glyph in cluster.glyphs {
                     if let Some(info) = self.glyph_cache.get(&glyph.id) {
