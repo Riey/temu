@@ -5,13 +5,12 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowBuilder};
 
-use crate::{TemuEvent, TemuPtyEvent};
+use crate::TemuEvent;
 
 pub struct WinitWindow {
     inner: Window,
     event_loop: EventLoop<()>,
     event_tx: Sender<TemuEvent>,
-    pty_event_tx: Sender<TemuPtyEvent>,
 }
 
 unsafe impl HasRawWindowHandle for WinitWindow {
@@ -21,10 +20,10 @@ unsafe impl HasRawWindowHandle for WinitWindow {
 }
 
 impl crate::TemuWindow for WinitWindow {
-    fn init(event_tx: Sender<TemuEvent>, pty_event_tx: Sender<TemuPtyEvent>) -> Self {
+    fn init(event_tx: Sender<TemuEvent>) -> Self {
         let event_loop = EventLoop::new();
         let inner = WindowBuilder::new()
-            .with_inner_size(LogicalSize::new(600, 400))
+            .with_inner_size(LogicalSize::new(600u32, 400u32))
             .with_title("Temu")
             .with_transparent(true)
             // for debug purpose
@@ -36,7 +35,6 @@ impl crate::TemuWindow for WinitWindow {
             inner,
             event_loop,
             event_tx,
-            pty_event_tx,
         }
     }
 
@@ -53,7 +51,6 @@ impl crate::TemuWindow for WinitWindow {
         let Self {
             inner: _,
             event_loop,
-            pty_event_tx,
             event_tx,
         } = self;
 
@@ -77,7 +74,7 @@ impl crate::TemuWindow for WinitWindow {
                             .ok();
                     }
                     WindowEvent::ReceivedCharacter(c) => {
-                        pty_event_tx.send(TemuPtyEvent::Char(c)).ok();
+                        event_tx.send(TemuEvent::Char(c)).ok();
                     }
                     _ => {}
                 },

@@ -3,16 +3,19 @@ mod cell;
 mod viewport;
 
 use std::{
+    io::{BufReader, Read},
+    mem::size_of,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use self::cell::CellContext;
 pub use self::viewport::Viewport;
-use crate::term::SharedTerminal;
 use crossbeam_channel::Receiver;
 use futures_executor::block_on;
 use temu_window::TemuEvent;
+use termwiz::escape::{parser::Parser, Action};
+use wezterm_term::{KeyCode, Terminal, TerminalSize};
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 
@@ -112,8 +115,28 @@ pub fn run(
     height: u32,
     scale_factor: f32,
     event_rx: Receiver<TemuEvent>,
-    shared_terminal: Arc<SharedTerminal>,
 ) {
+    let mut buffer = [0u8; 1024 * 8];
+
+    let (master, _shell) = crate::term::start_pty();
+    let mut input = master.try_clone_reader().unwrap();
+
+    let msg_rx = run_reader(input);
+    let output = master.try_clone_writer().unwrap();
+
+    let mut terminal = Terminal::new(
+        TerminalSize {
+            physical_cols: crate::COLUMN as _,
+            physical_rows: crate::ROW as _,
+            pixel_height: 0,
+            pixel_width: 0,
+        },
+        Arc::new(crate::term::TerminalConfig),
+        "temu",
+        "0.1.0",
+        output,
+    );
+
     let mut need_redraw = true;
 
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -143,7 +166,9 @@ pub fn run(
             need_redraw = false;
         }
 
-        if let Some(terminal) = shared_terminal.take_terminal() {
+        if let Ok(msg) = msg_rx.try_recv() {
+            terminal.perform_actions(msg);
+            terminal.increment_seqno();
             ctx.cell_ctx
                 .set_terminal(&ctx.device, &ctx.queue, &terminal);
             need_redraw = true;
@@ -151,6 +176,11 @@ pub fn run(
 
         match event_rx.try_recv() {
             Ok(event) => match event {
+                TemuEvent::Char(c) => {
+                    terminal
+                        .key_down(KeyCode::Char(c), Default::default())
+                        .unwrap();
+                }
                 TemuEvent::Close => {
                     break;
                 }
@@ -223,4 +253,36 @@ impl ScrollCalcResult {
         top: 0.0,
         bottom: 1.0,
     };
+}
+
+fn run_reader(input: Box<dyn Read + Send>) -> Receiver<Vec<Action>> {
+    let (tx, rx) = crossbeam_channel::bounded(512);
+
+    std::thread::spawn(move || {
+        let mut parser = Parser::new();
+        let mut reader = BufReader::new(input);
+        let mut buf = [0; 8196];
+
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => {
+                    log::info!("pty input ended");
+                    return;
+                }
+                Ok(len) => {
+                    let actions = parser.parse_as_vec(&buf[..len]);
+                    tx.send(actions).unwrap();
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {
+                    continue;
+                }
+                Err(err) => {
+                    log::error!("IO error: {}", err);
+                    return;
+                }
+            }
+        }
+    });
+
+    rx
 }

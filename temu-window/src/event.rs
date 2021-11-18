@@ -4,8 +4,5 @@ pub enum TemuEvent {
     Close,
     ScrollUp,
     ScrollDown,
-}
-
-pub enum TemuPtyEvent {
     Char(char),
 }

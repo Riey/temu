@@ -17,7 +17,6 @@ env_logger = "0.9.0"
 fps_counter = "2.0.0"
 futures-executor = "0.3.17"
 log = "0.4.14"
-termwiz = "0.13.0"
 wgpu = "0.11.0"
 
 portable-pty = "0.5.0"
@@ -27,6 +26,9 @@ etagere = "0.2.6"
 ahash = "0.7.6"
 swash = "0.1.4"
 euclid = "0.22.6"
+wezterm-term = { git = "https://github.com/wez/wezterm/" }
+termwiz = { git = "https://github.com/wez/wezterm/" }
+static_assertions = "1.1.0"
 
 [features]
 

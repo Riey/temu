@@ -10,10 +10,9 @@ use swash::{
 };
 use wgpu::util::DeviceExt;
 
-use crate::render::atals::ArrayAllocator;
-use crate::term::Terminal;
-
 use super::{atals::Allocation, Viewport};
+use crate::render::atals::ArrayAllocator;
+use wezterm_term::Terminal;
 
 const TEXTURE_WIDTH: u32 = 1024;
 const TEXTURE_SIZE: usize = (TEXTURE_WIDTH * TEXTURE_WIDTH) as usize;
@@ -342,6 +341,8 @@ impl CellContext {
     }
 
     pub fn set_terminal(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, term: &Terminal) {
+        let screen = term.screen();
+
         let mut t = String::new();
         let mut vertexes = Vec::new();
 
@@ -350,25 +351,24 @@ impl CellContext {
         //     self.prev_cursor as _,
         //     bytemuck::cast_slice(&[CellVertex { color: [0.0; 4] }]),
         // );
-        let cursor = term.cursor_pos() * size_of::<CellVertex>();
-        self.prev_cursor = cursor;
+        // let cursor = term.cursor_pos() * size_of::<CellVertex>();
+        // self.prev_cursor = cursor;
         // queue.write_buffer(
         //     &self.instances,
         //     cursor as _,
         //     bytemuck::cast_slice(&[CellVertex { color: [1.0; 4] }]),
         // );
 
-        self.desired_height = term.rows().len() as f32 * self.cell_size[1];
+        self.desired_height = screen.lines.len() as f32 * self.cell_size[1];
 
-        for (line_no, line) in term.rows().enumerate() {
+        for (line_no, line) in screen.lines.iter().enumerate() {
             let mut x = 0.0;
             let mut shaper = self
                 .shape_ctx
                 .builder(self.font)
                 .size(self.font_size)
                 .build();
-            line.write_text(&mut t);
-            shaper.add_str(&t);
+            shaper.add_str(&line.as_str());
 
             shaper.shape_with(|cluster| {
                 assert!(!cluster.is_ligature());
