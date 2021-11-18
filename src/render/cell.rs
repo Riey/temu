@@ -51,7 +51,6 @@ impl CellContext {
         // monospace width
         assert!(metrics.is_monospace);
         let glyph_metrics = font.glyph_metrics(&[]).scale(font_size);
-        dbg!(&metrics);
         let font_width = glyph_metrics.advance_width(font.charmap().map('M'));
         let font_height = metrics.ascent + metrics.descent;
         let cell_size = [font_width, font_height];

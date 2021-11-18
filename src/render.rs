@@ -178,7 +178,9 @@ pub fn run(
                 break;
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {
-                std::thread::sleep(std::time::Duration::from_millis(50));
+                if !need_redraw {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
             }
         }
     }
