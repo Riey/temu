@@ -111,6 +111,11 @@ fn cell_fs(in: CellOutput) -> [[location(0)]] vec4<f32> {
     return in.color;
 }
 
+fn calculate_text_pos(line_no: f32, position: vec2<f32>) -> vec2<f32> {
+    let pixel_pos = vec2<f32>(0.0, (line_no + 1.0) * window_size.cell_size.y) + vec2<f32>(position.x, -position.y);
+    return pixel_to_ndc(pixel_pos);
+}
+
 [[stage(vertex)]]
 fn text_vs(
     model: TextInput,

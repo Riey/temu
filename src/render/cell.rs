@@ -6,7 +6,6 @@ use rayon::prelude::*;
 use swash::{
     scale::{image::Image, Render, ScaleContext, Source},
     shape::ShapeContext,
-    text::cluster::{CharCluster, Parser},
     FontRef,
 };
 use wgpu::util::DeviceExt;
@@ -225,6 +224,7 @@ impl CellContext {
                         GlyphInfo {
                             tex_position: [alloc.x as _, alloc.y as _],
                             tex_size: [image.placement.width as _, image.placement.height as _],
+                            glyph_position: [image.placement.left as _, image.placement.top as _],
                             layer: alloc.layer as _,
                         },
                     );
@@ -348,10 +348,15 @@ impl CellContext {
             shaper.add_str(&t);
 
             shaper.shape_with(|cluster| {
+                // let s = &t[cluster.source.to_range()];
                 for glyph in cluster.glyphs {
                     if let Some(info) = self.glyph_cache.get(&glyph.id) {
                         vertexes.push(TextVertex {
-                            offset: [x + glyph.x, glyph.y + self.font_size * line_no as f32],
+                            offset: [
+                                x + glyph.x + info.glyph_position[0],
+                                self.font_size * (line_no + 1) as f32
+                                    - (info.glyph_position[1] + glyph.y),
+                            ],
                             tex_offset: info.tex_position,
                             tex_size: info.tex_size,
                             color: [1.0; 3],
@@ -429,6 +434,7 @@ pub struct WindowSize {
 
 struct GlyphInfo {
     tex_position: [f32; 2],
+    glyph_position: [f32; 2],
     tex_size: [f32; 2],
     layer: i32,
 }
