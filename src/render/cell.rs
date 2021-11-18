@@ -2,11 +2,13 @@ use std::{num::NonZeroU32, time::Instant};
 
 use ahash::AHashMap;
 use bytemuck::{Pod, Zeroable};
-use fontdue::{
-    layout::{CoordinateSystem, Layout, TextStyle},
-    Font, FontSettings,
-};
 use rayon::prelude::*;
+use swash::{
+    scale::{image::Image, Render, ScaleContext, Source},
+    shape::ShapeContext,
+    text::cluster::{CharCluster, Parser},
+    FontRef,
+};
 use wgpu::util::DeviceExt;
 
 use crate::render::atals::ArrayAllocator;
@@ -26,9 +28,13 @@ pub struct CellContext {
     text_instances: wgpu::Buffer,
     text_instance_count: usize,
     window_size_buf: wgpu::Buffer,
-    font: Font,
+    font: FontRef<'static>,
     font_size: f32,
-    glyph_cache: AHashMap<u16, Allocation>,
+    glyph_cache: AHashMap<u16, GlyphInfo>,
+    text_texture: wgpu::Texture,
+    image: Image,
+    shape_ctx: ShapeContext,
+    scale_ctx: ScaleContext,
 }
 
 impl CellContext {
@@ -38,21 +44,17 @@ impl CellContext {
         viewport: &Viewport,
         font_size: f32,
     ) -> Self {
-        let font_size = font_size.ceil();
+        let font_size = font_size;
 
-        let font = Font::from_bytes(
-            super::FONT,
-            FontSettings {
-                collection_index: 0,
-                scale: font_size,
-            },
-        )
-        .unwrap();
+        let font = FontRef::from_index(super::FONT, 0).unwrap();
 
-        let metrics = font.metrics('M', font_size);
+        let metrics = font.metrics(&[]).scale(font_size);
         // monospace width
-        let font_width = metrics.advance_width;
-        let font_height = font.horizontal_line_metrics(font_size).unwrap().new_line_size;
+        assert!(metrics.is_monospace);
+        let glyph_metrics = font.glyph_metrics(&[]).scale(font_size);
+        dbg!(&metrics);
+        let font_width = glyph_metrics.advance_width(font.charmap().map('M'));
+        let font_height = metrics.ascent + metrics.descent;
         let cell_size = [font_width, font_height];
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -187,17 +189,58 @@ impl CellContext {
 
         let mut allocator = ArrayAllocator::new(TEXTURE_WIDTH, TEXTURE_WIDTH);
 
-        let texture_infos = (0..font.glyph_count())
-            .filter_map(|id| {
-                let (metric, raster) = font.rasterize_indexed(id, font_size);
-                if raster.is_empty() {
-                    None
+        let mut glyph_cache = AHashMap::new();
+        let shape_ctx = ShapeContext::new();
+        let mut scale_ctx = ScaleContext::new();
+        let mut image = Image::new();
+        let mut data = vec![0; TEXTURE_SIZE * 2];
+        let mut layer_count = 1;
+
+        let mut scaler = scale_ctx.builder(font).size(font_size).build();
+
+        font.charmap().enumerate(|c, id| {
+            image.clear();
+            if Render::new(&[Source::Outline]).render_into(&mut scaler, id, &mut image) {
+                if image.placement.width == 0 || image.placement.height == 0 {
                 } else {
-                    let alloc = allocator.alloc(metric.width as _, metric.height as _);
-                    Some((id, metric.width as u16, alloc, raster))
+                    let alloc = allocator.alloc(image.placement.width, image.placement.height);
+                    if let Some(new_page) = alloc.layer.checked_sub(layer_count) {
+                        data.extend(std::iter::repeat(0).take(TEXTURE_SIZE * new_page as usize));
+                        layer_count += new_page;
+                    }
+                    let page = &mut data[TEXTURE_SIZE * alloc.layer as usize..][..TEXTURE_SIZE];
+                    let left_top = (alloc.y * TEXTURE_WIDTH + alloc.x) as usize;
+
+                    for (row_index, row) in image
+                        .data
+                        .chunks_exact(image.placement.width as usize)
+                        .enumerate()
+                    {
+                        let begin = left_top + row_index * TEXTURE_WIDTH as usize;
+                        let end = begin + row.len();
+                        page[begin..end].copy_from_slice(row);
+                    }
+                    glyph_cache.insert(
+                        id,
+                        GlyphInfo {
+                            tex_position: [alloc.x as _, alloc.y as _],
+                            tex_size: [image.placement.width as _, image.placement.height as _],
+                            layer: alloc.layer as _,
+                        },
+                    );
                 }
-            })
-            .collect::<Vec<_>>();
+            }
+        });
+
+        use std::io::Write;
+        let mut out = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open("foo.pgm")
+            .unwrap();
+        write!(out, "P5\n{} {}\n255\n", TEXTURE_WIDTH, TEXTURE_WIDTH).unwrap();
+        out.write_all(&data[..TEXTURE_SIZE]).unwrap();
+        out.flush().unwrap();
 
         let texture_size = wgpu::Extent3d {
             width: TEXTURE_WIDTH,
@@ -216,39 +259,8 @@ impl CellContext {
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut data = vec![0u8; TEXTURE_SIZE * allocator.layer_count() as usize];
-        let mut glyph_cache = AHashMap::with_capacity(font.glyph_count() as _);
-
-        for (glyph_id, width, alloc, raster) in texture_infos {
-            let page = &mut data[alloc.layer as usize * TEXTURE_SIZE..][..TEXTURE_SIZE];
-            let left_top = (alloc.y * TEXTURE_WIDTH + alloc.x) as usize;
-
-            for (row_index, row) in raster.chunks_exact(width as usize).enumerate() {
-                let begin = left_top + row_index * TEXTURE_WIDTH as usize;
-                let end = begin + row.len();
-                page[begin..end].copy_from_slice(row);
-            }
-
-            glyph_cache.insert(glyph_id, alloc);
-        }
-
-        use std::io::Write;
-        let mut out = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open("foo.pgm")
-            .unwrap();
-        write!(out, "P5\n{} {}\n255\n", TEXTURE_WIDTH, TEXTURE_WIDTH).unwrap();
-        out.write_all(&data[..TEXTURE_SIZE]).unwrap();
-        out.flush().unwrap();
-
         queue.write_texture(
-            wgpu::ImageCopyTexture {
-                aspect: wgpu::TextureAspect::All,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                texture: &texture,
-            },
+            texture.as_image_copy(),
             &data,
             wgpu::ImageDataLayout {
                 bytes_per_row: NonZeroU32::new(TEXTURE_WIDTH),
@@ -295,6 +307,9 @@ impl CellContext {
         });
 
         Self {
+            shape_ctx,
+            scale_ctx,
+            image,
             text_instances,
             text_instance_count: 0,
             instances,
@@ -306,6 +321,7 @@ impl CellContext {
             font_size,
             pipeline,
             text_pipeline,
+            text_texture: texture,
         }
     }
 
@@ -318,32 +334,37 @@ impl CellContext {
     }
 
     pub fn set_terminal(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, term: &Terminal) {
-        let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
         let mut t = String::new();
+        let mut vertexes = Vec::new();
 
-        for line in term.rows() {
+        for (line_no, line) in term.rows().enumerate() {
+            let mut x = 0.0;
+            let mut shaper = self
+                .shape_ctx
+                .builder(self.font)
+                .size(self.font_size)
+                .build();
             line.write_text(&mut t);
-            t.push('\n');
+            shaper.add_str(&t);
 
-            layout.append(&[&self.font], &TextStyle::new(&t, self.font_size, 0));
+            shaper.shape_with(|cluster| {
+                for glyph in cluster.glyphs {
+                    if let Some(info) = self.glyph_cache.get(&glyph.id) {
+                        vertexes.push(TextVertex {
+                            offset: [x + glyph.x, glyph.y + self.font_size * line_no as f32],
+                            tex_offset: info.tex_position,
+                            tex_size: info.tex_size,
+                            color: [1.0; 3],
+                            layer: info.layer as i32,
+                        });
+                    }
+                    x += glyph.advance;
+                }
+            });
 
             t.clear();
         }
 
-        let vertexes = layout
-            .glyphs()
-            .par_iter()
-            .filter_map(|g| {
-                let alloc = self.glyph_cache.get(&g.key.glyph_index)?;
-                Some(TextVertex {
-                    offset: [g.x, g.y],
-                    tex_size: [g.width as f32, g.height as f32],
-                    tex_offset: [alloc.x as f32, alloc.y as f32],
-                    color: [1.0, 1.0, 1.0],
-                    layer: alloc.layer as i32,
-                })
-            })
-            .collect::<Vec<_>>();
         if self.text_instance_count >= vertexes.len() {
             queue.write_buffer(&self.text_instances, 0, bytemuck::cast_slice(&vertexes));
         } else {
@@ -404,4 +425,10 @@ pub struct WindowSize {
     size: [f32; 2],
     cell_size: [f32; 2],
     column: u32,
+}
+
+struct GlyphInfo {
+    tex_position: [f32; 2],
+    tex_size: [f32; 2],
+    layer: i32,
 }

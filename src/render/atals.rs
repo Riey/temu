@@ -1,6 +1,6 @@
 use etagere::{BucketedAtlasAllocator, Size};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Allocation {
     pub x: u32,
     pub y: u32,

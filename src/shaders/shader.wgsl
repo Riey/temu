@@ -116,12 +116,11 @@ fn text_vs(
     model: TextInput,
 ) -> TextOutput {
     let rect = Rect(pixel_to_ndc(model.position), pixel_size_to_ndc(model.tex_size));
-
     let tex_rect = Rect(model.tex_position / TEXTURE_WIDTH, model.tex_size / TEXTURE_WIDTH);
     let pos = get_rect_position(rect, model.vertex_index);
     let tex_pos = get_rect_position(tex_rect, model.vertex_index);
     let color = model.color;
-    // let color = colorful_color(model.vertex_index);
+    // let color = colorful_color(model.vertex_index).rgb;
     return TextOutput(vec4<f32>(pos, 1.0, 1.0), tex_pos, color, model.layer);
 }
 
