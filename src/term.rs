@@ -2,7 +2,7 @@ mod grid;
 
 use crossbeam_utils::atomic::AtomicCell;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use std::{io::{self, BufReader, Read, Write}, sync::Arc};
+use std::{io::{self, BufReader, Read, Write}, sync::Arc, time::Instant};
 use termwiz::escape::parser::Parser;
 
 use crossbeam_channel::{Receiver, Sender};
@@ -70,12 +70,14 @@ pub fn run(
         match input.read(&mut buffer) {
             Ok(0) => break,
             Ok(len) => {
-                log::debug!("Read {} bytes from pty", len);
+                let start = Instant::now();
                 let bytes = &buffer[..len];
                 parser.parse(bytes, |action| {
                     grid.perform_action(action);
                 });
                 need_update = true;
+                let end = start.elapsed();
+                log::debug!("Read {} bytes from pty, take {}us", len, end.as_micros());
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => {
