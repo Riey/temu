@@ -167,7 +167,7 @@ impl CellContext {
             multisample: wgpu::MultisampleState::default(),
         });
 
-        let instance_count = 20;
+        let instance_count = (crate::COLUMN * crate::ROW) as usize;
 
         let instances = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell Vertex Buffer"),
@@ -178,7 +178,7 @@ impl CellContext {
         let window_size = WindowSize {
             size: [viewport.width() as f32, viewport.height() as f32],
             cell_size,
-            column: 5,
+            column: crate::COLUMN,
         };
         let window_size_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             contents: bytemuck::cast_slice(&[window_size]),

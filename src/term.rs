@@ -110,7 +110,7 @@ fn start_pty() -> (Box<dyn MasterPty + Send>, Box<dyn Child + Send + Sync>) {
 
     let pair = pty
         .openpty(PtySize {
-            cols: 60,
+            cols: super::COLUMN as _,
             rows: 20,
             pixel_width: 0,
             pixel_height: 0,

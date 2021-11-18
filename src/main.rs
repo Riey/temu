@@ -5,6 +5,9 @@ use crate::term::SharedTerminal;
 use std::sync::Arc;
 use temu_window::{init_native_window, TemuWindow};
 
+const COLUMN: u32 = 60;
+const ROW: u32 = 20;
+
 fn main() {
     let (event_tx, event_rx) = crossbeam_channel::bounded(64);
     let (pty_event_tx, pty_event_rx) = crossbeam_channel::bounded(64);
