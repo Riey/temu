@@ -190,7 +190,7 @@ pub fn run(
                     }
                     if prev_resize != (width, height) {
                         ctx.resize(width, height);
-                        need_redraw = true;
+                        // need_redraw = true;
                         prev_resize = (width, height);
                     }
                 }

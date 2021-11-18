@@ -1,7 +1,5 @@
-mod grid;
-
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use wezterm_term::{Terminal, TerminalConfiguration};
+use wezterm_term::TerminalConfiguration;
 
 #[derive(Clone, Debug)]
 pub struct TerminalConfig;

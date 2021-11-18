@@ -8,6 +8,7 @@ use swash::{
     shape::ShapeContext,
     FontRef,
 };
+use termwiz::surface::SequenceNo;
 use wgpu::util::DeviceExt;
 
 use super::{atals::Allocation, Viewport};
@@ -34,6 +35,7 @@ pub struct CellContext {
     glyph_cache: AHashMap<u16, GlyphInfo>,
     shape_ctx: ShapeContext,
     prev_cursor: usize,
+    prev_term_seqno: SequenceNo,
 }
 
 impl CellContext {
@@ -315,6 +317,7 @@ impl CellContext {
         Self {
             shape_ctx,
             prev_cursor: 0,
+            prev_term_seqno: 0,
             desired_height: 0.0,
             text_instances,
             text_instance_count: 0,
@@ -362,6 +365,9 @@ impl CellContext {
         self.desired_height = screen.lines.len() as f32 * self.cell_size[1];
 
         for (line_no, line) in screen.lines.iter().enumerate() {
+            // if !line.changed_since(self.prev_term_seqno) {
+            //     continue;
+            // }
             let mut x = 0.0;
             let mut shaper = self
                 .shape_ctx
@@ -405,6 +411,7 @@ impl CellContext {
         }
 
         self.text_instance_count = vertexes.len();
+        self.prev_term_seqno = term.current_seqno();
     }
 
     pub fn desired_height(&self) -> f32 {
