@@ -37,7 +37,6 @@ impl WgpuContext {
     ) -> Self {
         let mut scroll_state = ScrollState::new();
         scroll_state.page_size = 20;
-        scroll_state.top = 10;
         scroll_state.max = 100;
 
         let cell_ctx = CellContext::new(&device, &queue, &viewport, FONT_SIZE * scale_factor);
@@ -55,7 +54,6 @@ impl WgpuContext {
     pub fn resize(&mut self, width: u32, height: u32) {
         log::info!("Resize({}, {})", width, height);
 
-        self.cell_ctx.resize(&self.queue, width, height);
         self.viewport.resize(&self.device, width, height);
         // TODO: update scroll_state
     }
@@ -89,6 +87,12 @@ impl WgpuContext {
                 depth_stencil_attachment: None,
             });
 
+            let height = self.cell_ctx.desired_height().ceil().max(1.0);
+            self.cell_ctx
+                .resize(&self.queue, self.viewport.width(), height as _);
+            let top = (self.viewport.height() as f32 - height).min(0.0);
+            rpass.set_viewport(0.0, top, self.viewport.width() as f32, height, 0.0, 1.0);
+            rpass.set_scissor_rect(0, 0, self.viewport.width(), self.viewport.height());
             self.cell_ctx.draw(&mut rpass);
         }
 
@@ -179,8 +183,12 @@ pub fn run(
 }
 
 struct ScrollState {
-    top: u32,
+    /// 0 ~ 1 percent
+    /// scrollable area = (max - page_size)
+    scroll: f32,
+    /// entrt count
     max: u32,
+    /// how many line can be displayed
     page_size: u32,
 }
 
@@ -192,17 +200,17 @@ struct ScrollCalcResult {
 impl ScrollState {
     pub fn new() -> Self {
         Self {
-            top: 0,
+            scroll: 0.0,
             max: 1,
-            page_size: 1,
+            page_size: 10,
         }
     }
 
     pub fn calculate(&self) -> ScrollCalcResult {
-        match self.max.checked_sub(self.top) {
+        match self.max.checked_sub(self.page_size) {
             None => ScrollCalcResult::FULL,
             Some(left) => ScrollCalcResult {
-                top: self.top as f32 / self.max as f32,
+                top: self.scroll,
                 bottom: left as f32 / self.max as f32,
             },
         }

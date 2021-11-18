@@ -2,7 +2,11 @@ mod grid;
 
 use crossbeam_utils::atomic::AtomicCell;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use std::{io::{self, BufReader, Read, Write}, sync::Arc, time::Instant};
+use std::{
+    io::{self, BufReader, Read, Write},
+    sync::Arc,
+    time::Instant,
+};
 use termwiz::escape::parser::Parser;
 
 use crossbeam_channel::{Receiver, Sender};

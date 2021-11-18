@@ -30,6 +30,7 @@ pub struct CellContext {
     font: FontRef<'static>,
     font_size: f32,
     font_descent: f32,
+    desired_height: f32,
     cell_size: [f32; 2],
     glyph_cache: AHashMap<u16, GlyphInfo>,
     shape_ctx: ShapeContext,
@@ -315,6 +316,7 @@ impl CellContext {
         Self {
             shape_ctx,
             prev_cursor: 0,
+            desired_height: 0.0,
             text_instances,
             text_instance_count: 0,
             instances,
@@ -343,18 +345,20 @@ impl CellContext {
         let mut t = String::new();
         let mut vertexes = Vec::new();
 
-        queue.write_buffer(
-            &self.instances,
-            self.prev_cursor as _,
-            bytemuck::cast_slice(&[CellVertex { color: [0.0; 4] }]),
-        );
+        // queue.write_buffer(
+        //     &self.instances,
+        //     self.prev_cursor as _,
+        //     bytemuck::cast_slice(&[CellVertex { color: [0.0; 4] }]),
+        // );
         let cursor = term.cursor_pos() * size_of::<CellVertex>();
         self.prev_cursor = cursor;
-        queue.write_buffer(
-            &self.instances,
-            cursor as _,
-            bytemuck::cast_slice(&[CellVertex { color: [1.0; 4] }]),
-        );
+        // queue.write_buffer(
+        //     &self.instances,
+        //     cursor as _,
+        //     bytemuck::cast_slice(&[CellVertex { color: [1.0; 4] }]),
+        // );
+
+        self.desired_height = term.rows().len() as f32 * self.cell_size[1];
 
         for (line_no, line) in term.rows().enumerate() {
             let mut x = 0.0;
@@ -401,6 +405,10 @@ impl CellContext {
         }
 
         self.text_instance_count = vertexes.len();
+    }
+
+    pub fn desired_height(&self) -> f32 {
+        self.desired_height
     }
 
     pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) {
