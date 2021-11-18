@@ -2,10 +2,7 @@ mod grid;
 
 use crossbeam_utils::atomic::AtomicCell;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use std::{
-    io::{self, Read, Write},
-    sync::Arc,
-};
+use std::{io::{self, BufReader, Read, Write}, sync::Arc};
 use termwiz::escape::parser::Parser;
 
 use crossbeam_channel::{Receiver, Sender};
@@ -41,7 +38,7 @@ pub fn run(
 ) {
     let (master, _shell) = start_pty();
 
-    let mut input = master.try_clone_reader().unwrap();
+    let mut input = BufReader::new(master.try_clone_reader().unwrap());
 
     let mut output = master.try_clone_writer().unwrap();
 
