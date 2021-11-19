@@ -29,7 +29,6 @@ pub struct CellContext {
     font: FontRef<'static>,
     font_size: f32,
     font_descent: f32,
-    desired_size: [f32; 2],
     glyph_cache: AHashMap<u16, GlyphInfo>,
     shape_ctx: ShapeContext,
     prev_term_seqno: SequenceNo,
@@ -218,11 +217,11 @@ impl CellContext {
                 cursor_color: [1.0; 4],
                 cursor_pos: [0.0; 2],
                 scrollbar_width: 30.0,
-                scrollbar_height: 100.0,
-                scrollbar_top: 10.0,
-                pad: [0.0; 3],
+                scrollbar_height: 2.0,
                 scrollbar_bg: [1.0; 4],
-                scrollbar_fg: [0.6; 4],
+                scrollbar_fg: [0.5, 0.5, 0.5, 1.0],
+                scrollbar_top: -1.0,
+                pad: [0.0; 3],
             },
         );
 
@@ -354,7 +353,6 @@ impl CellContext {
             scroll_offset: 0,
             shape_ctx,
             prev_term_seqno: 0,
-            desired_size: [0.0, 0.0],
             text_instances: WgpuVec::new(device, wgpu::BufferUsages::VERTEX),
             instances: WgpuVec::new(device, wgpu::BufferUsages::VERTEX),
             bind_group,
@@ -390,22 +388,10 @@ impl CellContext {
     pub fn set_terminal(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, term: &Terminal) {
         let screen = term.screen();
 
-        // if let Ok(y) = usize::try_from(term.cursor_pos().y) {
-        //     let cursor = term.cursor_pos().x + y * screen.physical_cols;
-        //     dbg!(term.cursor_pos(), cursor);
-        // }
-
-        self.ui.update(queue, |ui| {
-            ui.cursor_pos = [
-                term.cursor_pos().x as _,
-                screen.phys_row(term.cursor_pos().y) as _,
-            ];
-        });
-
-        self.desired_size = [
-            screen.physical_cols as f32 * self.window_size.cell_size[0] + self.ui.scrollbar_width,
-            screen.physical_rows as f32 * self.window_size.cell_size[1],
-        ];
+        // self.desired_size = [
+        //     screen.physical_cols as f32 * self.window_size.cell_size[0] + self.ui.scrollbar_width,
+        //     screen.physical_rows as f32 * self.window_size.cell_size[1],
+        // ];
         self.instances.cpu_buffer_mut().resize(
             screen.physical_cols * screen.physical_rows,
             CellVertex {
@@ -417,6 +403,17 @@ impl CellContext {
         let start = self.scroll_offset;
         let end = self.scroll_offset + screen.physical_rows as StableRowIndex;
         let range = screen.stable_range(&(start..end));
+
+        self.ui.update(queue, |ui| {
+            ui.cursor_pos = [
+                term.cursor_pos().x as _,
+                screen.phys_row(term.cursor_pos().y) as _,
+            ];
+            let full_height = screen.lines.as_slices().0.len() as f32;
+
+            ui.scrollbar_top = 1.0 - (range.start as f32 / full_height) * 2.0;
+            ui.scrollbar_height = -(range.len() as f32 / full_height) * 2.0;
+        });
 
         for (line_no, line) in screen.lines.as_slices().0[range].iter().enumerate() {
             // if !line.changed_since(self.prev_term_seqno) {
@@ -462,10 +459,6 @@ impl CellContext {
         self.instances.write(device, queue);
         self.text_instances.write(device, queue);
         self.prev_term_seqno = term.current_seqno();
-    }
-
-    pub fn desired_size(&self) -> [f32; 2] {
-        self.desired_size
     }
 
     pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) {

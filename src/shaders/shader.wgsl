@@ -9,10 +9,13 @@ struct WindowSizeUniform {
 struct UiUniform {
     cursor_color: vec4<f32>;
     cursor_pos: vec2<f32>;
+    // px
     scrollbar_width: f32;
+    // ndc
     scrollbar_height: f32;
     scrollbar_fg: vec4<f32>;
     scrollbar_bg: vec4<f32>;
+    // ndc
     scrollbar_top: f32;
     pad: vec3<f32>;
 };
@@ -66,9 +69,19 @@ fn pixel_to_ndc(px: vec2<f32>) -> vec2<f32> {
     return vec2<f32>(norm.x - 1.0, 1.0 - norm.y);
 }
 
+fn pixel_x_to_ndc(x: f32) -> f32 {
+    let norm = x * 2.0 / window_size.size.x;
+    return norm - 1.0;
+}
+
 fn pixel_size_to_ndc(size: vec2<f32>) -> vec2<f32> {
     let size = size * 2.0 / window_size.size;
     return vec2<f32>(size.x, -size.y);
+}
+
+fn pixel_width_to_ndc(width: f32) -> f32 {
+    let width = width * 2.0 / window_size.size.x;
+    return width;
 }
 
 fn calculate_cell_rect(cell_index: u32) -> Rect {
@@ -180,13 +193,13 @@ fn ui_vs(
         // scrollbar inner
         case 2: {
             let rect = Rect(
-                pixel_to_ndc(vec2<f32>(window_size.size.x - ui.scrollbar_width, ui.scrollbar_top)),
-                pixel_size_to_ndc(vec2<f32>(ui.scrollbar_width, ui.scrollbar_height))
+                vec2<f32>(pixel_x_to_ndc(window_size.size.x - ui.scrollbar_width), ui.scrollbar_top),
+                vec2<f32>(pixel_width_to_ndc(ui.scrollbar_width), ui.scrollbar_height)
             );
             let pos = get_rect_position(rect, vertex_index);
 
             return CellOutput(vec4<f32>(pos, 1.0, 1.0), ui.scrollbar_fg);
-            // return CellOutput(vec4<f32>(pos, 1.0, 1.0), vec4<f32>(1.0));
+            // return CellOutput(vec4<f32>(pos, 1.0, 1.0), vec4<f32>(1.0, 0.0, 0.0, 1.0));
         }
         default: {
             // Unknown
