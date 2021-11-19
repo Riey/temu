@@ -1,4 +1,4 @@
-mod atals;
+mod atlas;
 mod cell;
 mod viewport;
 
@@ -26,7 +26,6 @@ pub struct WgpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
     cell_ctx: CellContext,
-    scroll_state: ScrollState,
     str_buf: String,
 }
 
@@ -37,10 +36,6 @@ impl WgpuContext {
         queue: wgpu::Queue,
         scale_factor: f32,
     ) -> Self {
-        let mut scroll_state = ScrollState::new();
-        scroll_state.page_size = 20;
-        scroll_state.max = 100;
-
         let cell_ctx = CellContext::new(&device, &queue, &viewport, FONT_SIZE * scale_factor);
 
         Self {
@@ -48,7 +43,6 @@ impl WgpuContext {
             viewport,
             device,
             queue,
-            scroll_state,
             str_buf: String::new(),
         }
     }
@@ -225,49 +219,6 @@ pub fn run(
             }
         }
     }
-}
-
-struct ScrollState {
-    /// 0 ~ 1 percent
-    /// scrollable area = (max - page_size)
-    scroll: f32,
-    /// entrt count
-    max: u32,
-    /// how many line can be displayed
-    page_size: u32,
-}
-
-struct ScrollCalcResult {
-    top: f32,
-    bottom: f32,
-}
-
-impl ScrollState {
-    pub fn new() -> Self {
-        Self {
-            scroll: 0.0,
-            max: 1,
-            page_size: 10,
-        }
-    }
-
-    pub fn calculate(&self) -> ScrollCalcResult {
-        match self.max.checked_sub(self.page_size) {
-            None => ScrollCalcResult::FULL,
-            Some(left) => ScrollCalcResult {
-                top: self.scroll,
-                bottom: left as f32 / self.max as f32,
-            },
-        }
-    }
-}
-
-impl ScrollCalcResult {
-    /// Can display all lines
-    const FULL: Self = ScrollCalcResult {
-        top: 0.0,
-        bottom: 1.0,
-    };
 }
 
 fn run_reader(input: Box<dyn Read + Send>) -> Receiver<Vec<Action>> {

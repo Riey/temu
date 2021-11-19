@@ -10,7 +10,7 @@ use swash::{
 use termwiz::surface::SequenceNo;
 use wgpu_container::{WgpuCell, WgpuVec};
 
-use crate::render::atals::ArrayAllocator;
+use crate::render::atlas::ArrayAllocator;
 use crate::render::Viewport;
 use wezterm_term::{StableRowIndex, Terminal};
 
