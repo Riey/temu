@@ -337,6 +337,7 @@ impl CellContext {
         // );
 
         self.desired_height = screen.lines.len() as f32 * self.window_size_buf.cell_height();
+        self.text_instances.as_vec_mut().clear();
 
         for (line_no, line) in screen.lines.iter().enumerate() {
             // if !line.changed_since(self.prev_term_seqno) {
@@ -363,7 +364,7 @@ impl CellContext {
                         let (r, g, b, _) = palette
                             .resolve_fg(cell.attrs().foreground())
                             .to_tuple_rgba();
-                        self.text_instances.push(TextVertex {
+                        self.text_instances.as_vec_mut().push(TextVertex {
                             offset: [
                                 x + glyph.x + info.glyph_position[0],
                                 self.window_size_buf.cell_height() * (line_no + 1) as f32
@@ -382,7 +383,7 @@ impl CellContext {
             t.clear();
         }
 
-        self.text_instances.flush(device, queue);
+        self.text_instances.write(device, queue);
         self.prev_term_seqno = term.current_seqno();
     }
 
@@ -396,13 +397,13 @@ impl CellContext {
         rpass.push_debug_group("Draw cell");
         rpass.set_pipeline(&self.pipeline);
         rpass.set_vertex_buffer(0, self.instances.slice(..));
-        rpass.draw(0..4, 0..self.instances.buffer_len());
+        rpass.draw(0..4, 0..self.instances.len());
         rpass.pop_debug_group();
 
         rpass.push_debug_group("Draw text");
         rpass.set_pipeline(&self.text_pipeline);
         rpass.set_vertex_buffer(0, self.text_instances.slice(..));
-        rpass.draw(0..4, 0..self.text_instances.buffer_len());
+        rpass.draw(0..4, 0..self.text_instances.len());
         rpass.pop_debug_group();
     }
 }
