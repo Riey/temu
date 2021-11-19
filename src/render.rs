@@ -14,7 +14,7 @@ use crossbeam_channel::Receiver;
 use futures_executor::block_on;
 use temu_window::TemuEvent;
 use termwiz::escape::{parser::Parser, Action};
-use wezterm_term::{KeyCode, Terminal, TerminalSize};
+use wezterm_term::{CellAttributes, KeyCode, Terminal, TerminalSize};
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 
@@ -54,7 +54,7 @@ impl WgpuContext {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-        log::info!("Resize({}, {})", width, height);
+        log::trace!("Resize({}, {})", width, height);
 
         self.viewport.resize(&self.device, width, height);
         // TODO: update scroll_state
@@ -104,7 +104,7 @@ impl WgpuContext {
 
         let end = start.elapsed();
 
-        log::info!("Redraw elapsed: {}us", end.as_micros());
+        log::debug!("Redraw elapsed: {}us", end.as_micros());
     }
 }
 
@@ -116,10 +116,8 @@ pub fn run(
     scale_factor: f32,
     event_rx: Receiver<TemuEvent>,
 ) {
-    let mut buffer = [0u8; 1024 * 8];
-
     let (master, _shell) = crate::term::start_pty();
-    let mut input = master.try_clone_reader().unwrap();
+    let input = master.try_clone_reader().unwrap();
 
     let msg_rx = run_reader(input);
     let output = master.try_clone_writer().unwrap();

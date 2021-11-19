@@ -378,27 +378,30 @@ impl CellContext {
         // }
 
         self.ui.update(queue, |ui| {
-            let cursor_pos = term.cursor_pos(); 
-
             ui.cursor_pos = [
-                cursor_pos.x as _,
-                screen.phys_row(cursor_pos.y) as _,
+                term.cursor_pos().x as _,
+                screen.phys_row(term.cursor_pos().y) as _,
             ];
         });
 
         self.desired_size = [
             screen.physical_cols as f32 * self.window_size.cell_size[0],
-            screen.lines.len() as f32 * self.window_size.cell_size[1],
+            screen.physical_rows as f32 * self.window_size.cell_size[1],
         ];
         self.instances.cpu_buffer_mut().resize(
-            screen.physical_cols * screen.lines.len(),
+            screen.physical_cols * screen.physical_rows,
             CellVertex {
                 color: [0.1, 0.1, 0.1, 1.0],
             },
         );
         self.text_instances.cpu_buffer_mut().clear();
 
-        for (line_no, line) in screen.lines.iter().enumerate() {
+        for (line_no, line) in screen
+            .lines
+            .iter()
+            .skip(screen.lines.len() - screen.physical_rows)
+            .enumerate()
+        {
             // if !line.changed_since(self.prev_term_seqno) {
             //     continue;
             // }
