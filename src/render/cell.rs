@@ -378,8 +378,12 @@ impl CellContext {
         // }
 
         self.ui.update(queue, |ui| {
-            ui.cursor_pos = [term.cursor_pos().x as _, screen.phys_row(term.cursor_pos().y) as _];
-            dbg!(ui.cursor_pos);
+            let cursor_pos = term.cursor_pos(); 
+
+            ui.cursor_pos = [
+                cursor_pos.x as _,
+                screen.phys_row(cursor_pos.y) as _,
+            ];
         });
 
         self.desired_size = [
@@ -387,7 +391,7 @@ impl CellContext {
             screen.lines.len() as f32 * self.window_size.cell_size[1],
         ];
         self.instances.cpu_buffer_mut().resize(
-            screen.physical_cols * screen.physical_rows,
+            screen.physical_cols * screen.lines.len(),
             CellVertex {
                 color: [0.1, 0.1, 0.1, 1.0],
             },
@@ -412,8 +416,7 @@ impl CellContext {
             shaper.shape_with(|cluster| {
                 let (cluster_cells, new_cells) = cells.split_at(cluster.glyphs.len());
                 cells = new_cells;
-                assert!(!cluster.is_ligature());
-                // let s = &t[cluster.source.to_range()];
+                // let s = &s[cluster.source.to_range()];
                 for (glyph, cell) in cluster.glyphs.iter().zip(cluster_cells) {
                     if let Some(info) = self.glyph_cache.get(&glyph.id) {
                         let (r, g, b, _) = palette
