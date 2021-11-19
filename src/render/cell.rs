@@ -11,7 +11,7 @@ use swash::{
 use termwiz::surface::SequenceNo;
 use wgpu::util::DeviceExt;
 
-use super::{atals::Allocation, Viewport};
+use super::{wgpu_vec::WgpuVec, Viewport};
 use crate::render::atals::ArrayAllocator;
 use wezterm_term::Terminal;
 
@@ -22,10 +22,8 @@ pub struct CellContext {
     pipeline: wgpu::RenderPipeline,
     text_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
-    instances: wgpu::Buffer,
-    instance_count: usize,
-    text_instances: wgpu::Buffer,
-    text_instance_count: usize,
+    instances: WgpuVec<CellVertex>,
+    text_instances: WgpuVec<TextVertex>,
     window_size_buf: WindowSizeBuf,
     font: FontRef<'static>,
     font_size: f32,
@@ -167,14 +165,6 @@ impl CellContext {
             multisample: wgpu::MultisampleState::default(),
         });
 
-        let instance_count = (crate::COLUMN * crate::ROW) as usize;
-
-        let instances = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Cell Vertex Buffer"),
-            contents: bytemuck::cast_slice(&create_cell_instance(instance_count)),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-
         let window_size_buf = WindowSizeBuf::new(
             device,
             WindowSize {
@@ -304,22 +294,13 @@ impl CellContext {
             ],
         });
 
-        let text_instances = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("text instance buffer"),
-            mapped_at_creation: false,
-            size: (std::mem::size_of::<TextVertex>() * instance_count) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-
         Self {
             shape_ctx,
             prev_cursor: 0,
             prev_term_seqno: 0,
             desired_height: 0.0,
-            text_instances,
-            text_instance_count: 0,
-            instances,
-            instance_count,
+            text_instances: WgpuVec::new(device, wgpu::BufferUsages::VERTEX),
+            instances: WgpuVec::new(device, wgpu::BufferUsages::VERTEX),
             bind_group,
             glyph_cache,
             window_size_buf,
@@ -341,7 +322,6 @@ impl CellContext {
         let screen = term.screen();
 
         let mut t = String::new();
-        let mut vertexes = Vec::new();
 
         // queue.write_buffer(
         //     &self.instances,
@@ -383,7 +363,7 @@ impl CellContext {
                         let (r, g, b, _) = palette
                             .resolve_fg(cell.attrs().foreground())
                             .to_tuple_rgba();
-                        vertexes.push(TextVertex {
+                        self.text_instances.push(TextVertex {
                             offset: [
                                 x + glyph.x + info.glyph_position[0],
                                 self.window_size_buf.cell_height() * (line_no + 1) as f32
@@ -402,17 +382,7 @@ impl CellContext {
             t.clear();
         }
 
-        if self.text_instance_count >= vertexes.len() {
-            queue.write_buffer(&self.text_instances, 0, bytemuck::cast_slice(&vertexes));
-        } else {
-            self.text_instances = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("text instance"),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                contents: bytemuck::cast_slice(&vertexes),
-            });
-        }
-
-        self.text_instance_count = vertexes.len();
+        self.text_instances.flush(device, queue);
         self.prev_term_seqno = term.current_seqno();
     }
 
@@ -426,13 +396,13 @@ impl CellContext {
         rpass.push_debug_group("Draw cell");
         rpass.set_pipeline(&self.pipeline);
         rpass.set_vertex_buffer(0, self.instances.slice(..));
-        rpass.draw(0..4, 0..self.instance_count as u32);
+        rpass.draw(0..4, 0..self.instances.buffer_len());
         rpass.pop_debug_group();
 
         rpass.push_debug_group("Draw text");
         rpass.set_pipeline(&self.text_pipeline);
         rpass.set_vertex_buffer(0, self.text_instances.slice(..));
-        rpass.draw(0..4, 0..self.text_instance_count as u32);
+        rpass.draw(0..4, 0..self.text_instances.buffer_len());
         rpass.pop_debug_group();
     }
 }
@@ -451,14 +421,6 @@ struct TextVertex {
     tex_size: [f32; 2],
     color: [f32; 3],
     layer: i32,
-}
-
-fn create_cell_instance(count: usize) -> Vec<CellVertex> {
-    std::iter::repeat_with(|| CellVertex {
-        color: [0.0, 0.0, 0.0, 0.0],
-    })
-    .take(count)
-    .collect()
 }
 
 #[repr(C)]

@@ -1,6 +1,7 @@
 mod atals;
 mod cell;
 mod viewport;
+mod wgpu_vec;
 
 use std::{
     io::{BufReader, Read},
