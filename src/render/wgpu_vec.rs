@@ -9,16 +9,18 @@ pub struct WgpuVec<T: Pod + Zeroable> {
     buffer: Vec<T>,
 }
 
+const INIT_CAP: usize = 1024;
+
 impl<T: Pod + Zeroable> WgpuVec<T> {
     pub fn new(device: &wgpu::Device, usage: wgpu::BufferUsages) -> Self {
         Self {
             inner: device.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
                 mapped_at_creation: false,
-                size: 0,
+                size: (std::mem::size_of::<T>() * INIT_CAP) as u64,
                 usage: usage | wgpu::BufferUsages::COPY_DST,
             }),
-            inner_cap: 0,
+            inner_cap: INIT_CAP,
             buffer_len: 0,
             buffer: Vec::new(),
             usage: usage | wgpu::BufferUsages::COPY_DST,
