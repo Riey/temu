@@ -5,7 +5,7 @@ mod viewport;
 use std::{
     io::{BufReader, Read},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use self::cell::CellContext;
@@ -82,16 +82,17 @@ impl WgpuContext {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.viewport.background()),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: None,
             });
 
-            let height = self.cell_ctx.desired_height().ceil().max(1.0);
-            let width = self.viewport.width() as f32;
-            self.cell_ctx.resize(&self.queue, width, height as _);
+            let [width, height] = self.cell_ctx.desired_size();
+            let width = width.ceil().max(1.0);
+            let height = height.ceil().max(1.0);
+            self.cell_ctx.resize(&self.queue, width as _, height as _);
             let top = (self.viewport.height() as f32 - height).min(0.0);
             rpass.set_viewport(0.0, top, width, height, 0.0, 1.0);
             rpass.set_scissor_rect(0, 0, self.viewport.width(), self.viewport.height());

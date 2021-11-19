@@ -1,4 +1,4 @@
-use bytemuck::{cast_slice, Pod, Zeroable};
+use bytemuck::{cast_slice, Pod};
 use std::{ops::Deref, slice::from_ref};
 use wgpu::util::DeviceExt;
 
