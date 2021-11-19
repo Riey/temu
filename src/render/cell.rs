@@ -12,7 +12,7 @@ use wgpu_container::{WgpuCell, WgpuVec};
 
 use crate::render::atals::ArrayAllocator;
 use crate::render::Viewport;
-use wezterm_term::Terminal;
+use wezterm_term::{ScrollbackOrVisibleRowIndex, StableRowIndex, Terminal, VisibleRowIndex};
 
 const TEXTURE_WIDTH: u32 = 1024;
 const TEXTURE_SIZE: usize = (TEXTURE_WIDTH * TEXTURE_WIDTH) as usize;
@@ -33,6 +33,7 @@ pub struct CellContext {
     glyph_cache: AHashMap<u16, GlyphInfo>,
     shape_ctx: ShapeContext,
     prev_term_seqno: SequenceNo,
+    scroll_offset: StableRowIndex,
 }
 
 impl CellContext {
@@ -345,6 +346,7 @@ impl CellContext {
         });
 
         Self {
+            scroll_offset: 0,
             shape_ctx,
             prev_term_seqno: 0,
             desired_size: [0.0, 0.0],
@@ -367,6 +369,17 @@ impl CellContext {
         self.window_size.update(queue, |size| {
             size.size = [width, height];
         });
+    }
+
+    pub fn scroll(&mut self, offset: StableRowIndex, term: &Terminal) {
+        let screen = term.screen();
+        let min = 0;
+        let max = screen.visible_row_to_stable_row(0);
+        self.scroll_offset = (self.scroll_offset + offset).max(min).min(max);
+    }
+
+    pub fn scroll_to_bottom(&mut self, term: &Terminal) {
+        self.scroll_offset = term.screen().visible_row_to_stable_row(0);
     }
 
     pub fn set_terminal(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, term: &Terminal) {
@@ -396,10 +409,12 @@ impl CellContext {
         );
         self.text_instances.cpu_buffer_mut().clear();
 
-        for (line_no, line) in screen
-            .lines
+        let start = self.scroll_offset;
+        let end = self.scroll_offset + screen.physical_rows as StableRowIndex;
+        let range = screen.stable_range(&(start..end));
+
+        for (line_no, line) in screen.lines.as_slices().0[range]
             .iter()
-            .skip(screen.lines.len() - screen.physical_rows)
             .enumerate()
         {
             // if !line.changed_since(self.prev_term_seqno) {

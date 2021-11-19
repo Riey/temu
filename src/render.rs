@@ -166,7 +166,7 @@ pub fn run(
 
         if let Ok(msg) = msg_rx.try_recv() {
             terminal.perform_actions(msg);
-            terminal.increment_seqno();
+            ctx.cell_ctx.scroll_to_bottom(&terminal);
             ctx.cell_ctx
                 .set_terminal(&ctx.device, &ctx.queue, &terminal);
             need_redraw = true;
@@ -195,8 +195,18 @@ pub fn run(
                 TemuEvent::Redraw => {
                     need_redraw = true;
                 }
-                TemuEvent::ScrollUp => {}
-                TemuEvent::ScrollDown => {}
+                TemuEvent::ScrollUp => {
+                    ctx.cell_ctx.scroll(-1, &terminal);
+                    ctx.cell_ctx
+                        .set_terminal(&ctx.device, &ctx.queue, &terminal);
+                    need_redraw = true;
+                }
+                TemuEvent::ScrollDown => {
+                    ctx.cell_ctx.scroll(1, &terminal);
+                    ctx.cell_ctx
+                        .set_terminal(&ctx.device, &ctx.queue, &terminal);
+                    need_redraw = true;
+                }
             },
             Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 break;
