@@ -23,7 +23,7 @@ impl crate::TemuWindow for WinitWindow {
     fn init(event_tx: Sender<TemuEvent>) -> Self {
         let event_loop = EventLoop::new();
         let inner = WindowBuilder::new()
-            .with_inner_size(LogicalSize::new(600u32, 400u32))
+            .with_inner_size(LogicalSize::new(720u32, 400u32))
             .with_title("Temu")
             .with_transparent(true)
             // for debug purpose

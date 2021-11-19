@@ -3,8 +3,8 @@ mod term;
 
 use temu_window::{init_native_window, TemuWindow};
 
-const COLUMN: u32 = 60;
-const ROW: u32 = 20;
+const COLUMN: u32 = 80;
+const ROW: u32 = 23;
 
 fn main() {
     let (event_tx, event_rx) = crossbeam_channel::bounded(64);

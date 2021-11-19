@@ -8,6 +8,7 @@ members = [
 name = "temu"
 version = "0.1.0"
 edition = "2021"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 temu-window = { path = "./temu-window" }
