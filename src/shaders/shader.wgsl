@@ -5,9 +5,22 @@ struct WindowSizeUniform {
     column: u32;
 };
 
+[[block]]
+struct UiUniform {
+    cursor_pos: vec2<f32>;
+    pad: vec2<f32>;
+    cursor_color: vec4<f32>;
+    // scrollbar_fg: vec4<f32>;
+    // scrollbar_bg: vec4<f32>;
+    // scrollbar_width: f32;
+    // scrollbar_top: f32;
+    // scrollbar_bottom: f32;
+};
+
 [[group(0), binding(0)]] var<uniform> window_size: WindowSizeUniform;
-[[group(0), binding(1)]] var font_texture: texture_2d_array<f32>;
-[[group(0), binding(2)]] var font_sampler: sampler;
+[[group(0), binding(1)]] var<uniform> ui: UiUniform;
+[[group(0), binding(5)]] var font_texture: texture_2d_array<f32>;
+[[group(0), binding(6)]] var font_sampler: sampler;
 
 let TEXTURE_WIDTH: f32 = 1024.0;
 
@@ -138,4 +151,24 @@ fn text_fs(in: TextOutput) -> [[location(0)]] vec4<f32> {
     // }
     let color = vec4<f32>(in.color, alpha);
     return color;
+}
+
+[[stage(vertex)]]
+fn ui_vs(
+    [[builtin(vertex_index)]] vertex_index: u32,
+    [[builtin(instance_index)]] ui_index: u32,
+) -> CellOutput {
+    switch (ui_index) {
+        // cursor
+        case 0: {
+            let rect = Rect(pixel_to_ndc(ui.cursor_pos * window_size.cell_size), pixel_size_to_ndc(window_size.cell_size));
+            let pos = get_rect_position(rect, vertex_index);
+
+            return CellOutput(vec4<f32>(pos, 1.0, 1.0), ui.cursor_color);
+        }
+        default: {
+            // Unknown
+            return CellOutput(vec4<f32>(0.0), vec4<f32>(0.0));
+        }
+    }
 }

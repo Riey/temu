@@ -20,9 +20,11 @@ const TEXTURE_SIZE: usize = (TEXTURE_WIDTH * TEXTURE_WIDTH) as usize;
 pub struct CellContext {
     pipeline: wgpu::RenderPipeline,
     text_pipeline: wgpu::RenderPipeline,
+    ui_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     instances: WgpuVec<CellVertex>,
     text_instances: WgpuVec<TextVertex>,
+    ui: WgpuCell<Ui>,
     window_size: WgpuCell<WindowSize>,
     font: FontRef<'static>,
     font_size: f32,
@@ -67,6 +69,16 @@ impl CellContext {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         view_dimension: wgpu::TextureViewDimension::D2Array,
@@ -76,7 +88,7 @@ impl CellContext {
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: 6,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler {
                         comparison: false,
@@ -108,6 +120,32 @@ impl CellContext {
                         0 => Float32x4,
                     ],
                 }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "cell_fs",
+                targets: &[wgpu::ColorTargetState {
+                    format: viewport.format(),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                }],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                front_face: wgpu::FrontFace::Cw,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+        });
+
+        let ui_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("ui_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "ui_vs",
+                buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -170,6 +208,15 @@ impl CellContext {
                 size: [viewport.width() as f32, viewport.height() as f32],
                 cell_size,
                 column: crate::COLUMN,
+            },
+        );
+        let ui = WgpuCell::new(
+            device,
+            wgpu::BufferUsages::UNIFORM,
+            Ui {
+                cursor_pos: [0.0; 2],
+                _pad: [0.0; 2],
+                cursor_color: [1.0; 4],
             },
         );
 
@@ -284,10 +331,14 @@ impl CellContext {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
+                    resource: ui.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
                     resource: wgpu::BindingResource::TextureView(&texture_view),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding: 6,
                     resource: wgpu::BindingResource::Sampler(&font_texture_sampler),
                 },
             ],
@@ -302,11 +353,13 @@ impl CellContext {
             bind_group,
             glyph_cache,
             window_size,
+            ui,
             font,
             font_size,
             font_descent: metrics.descent,
             pipeline,
             text_pipeline,
+            ui_pipeline,
         }
     }
 
@@ -319,22 +372,15 @@ impl CellContext {
     pub fn set_terminal(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, term: &Terminal) {
         let screen = term.screen();
 
-        let mut t = String::new();
-
-        // queue.write_buffer(
-        //     &self.instances,
-        //     self.prev_cursor as _,
-        //     bytemuck::cast_slice(&[CellVertex { color: [0.0; 4] }]),
-        // );
         // if let Ok(y) = usize::try_from(term.cursor_pos().y) {
         //     let cursor = term.cursor_pos().x + y * screen.physical_cols;
         //     dbg!(term.cursor_pos(), cursor);
         // }
-        // queue.write_buffer(
-        //     &self.instances,
-        //     cursor as _,
-        //     bytemuck::cast_slice(&[CellVertex { color: [1.0; 4] }]),
-        // );
+
+        self.ui.update(queue, |ui| {
+            ui.cursor_pos = [term.cursor_pos().x as _, screen.phys_row(term.cursor_pos().y) as _];
+            dbg!(ui.cursor_pos);
+        });
 
         self.desired_size = [
             screen.physical_cols as f32 * self.window_size.cell_size[0],
@@ -388,8 +434,6 @@ impl CellContext {
                     x += glyph.advance;
                 }
             });
-
-            t.clear();
         }
 
         self.instances.write(device, queue);
@@ -415,6 +459,12 @@ impl CellContext {
         rpass.set_vertex_buffer(0, self.text_instances.gpu_buffer().slice(..));
         rpass.draw(0..4, 0..self.text_instances.len() as _);
         rpass.pop_debug_group();
+
+        rpass.push_debug_group("Draw ui");
+        rpass.set_pipeline(&self.ui_pipeline);
+        // cursor
+        rpass.draw(0..4, 0..1);
+        rpass.pop_debug_group();
     }
 }
 
@@ -435,11 +485,19 @@ struct TextVertex {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct WindowSize {
     size: [f32; 2],
     cell_size: [f32; 2],
     column: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct Ui {
+    cursor_pos: [f32; 2],
+    _pad: [f32; 2],
+    cursor_color: [f32; 4],
 }
 
 struct GlyphInfo {
