@@ -11,7 +11,7 @@ use swash::{
 use termwiz::surface::SequenceNo;
 use wgpu::util::DeviceExt;
 
-use super::{wgpu_vec::WgpuVec, Viewport};
+use super::{wgpu_cell::WgpuCell, wgpu_vec::WgpuVec, Viewport};
 use crate::render::atals::ArrayAllocator;
 use wezterm_term::Terminal;
 
@@ -24,7 +24,7 @@ pub struct CellContext {
     bind_group: wgpu::BindGroup,
     instances: WgpuVec<CellVertex>,
     text_instances: WgpuVec<TextVertex>,
-    window_size_buf: WindowSizeBuf,
+    window_size: WgpuCell<WindowSize>,
     font: FontRef<'static>,
     font_size: f32,
     font_descent: f32,
@@ -165,8 +165,9 @@ impl CellContext {
             multisample: wgpu::MultisampleState::default(),
         });
 
-        let window_size_buf = WindowSizeBuf::new(
+        let window_size = WgpuCell::new(
             device,
+            wgpu::BufferUsages::UNIFORM,
             WindowSize {
                 size: [viewport.width() as f32, viewport.height() as f32],
                 cell_size,
@@ -281,7 +282,7 @@ impl CellContext {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: window_size_buf.as_entire_binding(),
+                    resource: window_size.buffer().as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -303,7 +304,7 @@ impl CellContext {
             instances: WgpuVec::new(device, wgpu::BufferUsages::VERTEX),
             bind_group,
             glyph_cache,
-            window_size_buf,
+            window_size,
             font,
             font_size,
             font_descent: metrics.descent,
@@ -313,7 +314,7 @@ impl CellContext {
     }
 
     pub fn resize(&mut self, queue: &wgpu::Queue, width: f32, height: f32) {
-        self.window_size_buf.update_size(queue, |size| {
+        self.window_size.update(queue, |size| {
             size.size = [width, height];
         });
     }
@@ -336,7 +337,7 @@ impl CellContext {
         //     bytemuck::cast_slice(&[CellVertex { color: [1.0; 4] }]),
         // );
 
-        self.desired_height = screen.lines.len() as f32 * self.window_size_buf.cell_height();
+        self.desired_height = screen.lines.len() as f32 * self.window_size.cell_size[1];
         self.text_instances.as_vec_mut().clear();
 
         for (line_no, line) in screen.lines.iter().enumerate() {
@@ -367,7 +368,7 @@ impl CellContext {
                         self.text_instances.as_vec_mut().push(TextVertex {
                             offset: [
                                 x + glyph.x + info.glyph_position[0],
-                                self.window_size_buf.cell_height() * (line_no + 1) as f32
+                                self.window_size.cell_size[1] * (line_no + 1) as f32
                                     - (info.glyph_position[1] + glyph.y + self.font_descent),
                             ],
                             tex_offset: info.tex_position,
@@ -430,41 +431,6 @@ struct WindowSize {
     size: [f32; 2],
     cell_size: [f32; 2],
     column: u32,
-}
-
-struct WindowSizeBuf {
-    buf: wgpu::Buffer,
-    size: WindowSize,
-}
-
-impl WindowSizeBuf {
-    pub fn new(device: &wgpu::Device, size: WindowSize) -> Self {
-        Self {
-            buf: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                contents: bytemuck::cast_slice(std::slice::from_ref(&size)),
-                label: Some("window_size buf"),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }),
-            size,
-        }
-    }
-
-    pub fn as_entire_binding(&self) -> wgpu::BindingResource {
-        self.buf.as_entire_binding()
-    }
-
-    pub fn cell_height(&self) -> f32 {
-        self.size.cell_size[1]
-    }
-
-    pub fn update_size(&mut self, queue: &wgpu::Queue, f: impl FnOnce(&mut WindowSize)) {
-        f(&mut self.size);
-        queue.write_buffer(
-            &self.buf,
-            0,
-            bytemuck::cast_slice(std::slice::from_ref(&self.size)),
-        );
-    }
 }
 
 struct GlyphInfo {
