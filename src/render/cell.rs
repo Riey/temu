@@ -26,12 +26,11 @@ pub struct CellContext {
     instance_count: usize,
     text_instances: wgpu::Buffer,
     text_instance_count: usize,
-    window_size_buf: wgpu::Buffer,
+    window_size_buf: WindowSizeBuf,
     font: FontRef<'static>,
     font_size: f32,
     font_descent: f32,
     desired_height: f32,
-    cell_size: [f32; 2],
     glyph_cache: AHashMap<u16, GlyphInfo>,
     shape_ctx: ShapeContext,
     prev_cursor: usize,
@@ -176,16 +175,14 @@ impl CellContext {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        let window_size = WindowSize {
-            size: [viewport.width() as f32, viewport.height() as f32],
-            cell_size,
-            column: crate::COLUMN,
-        };
-        let window_size_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            contents: bytemuck::cast_slice(&[window_size]),
-            label: Some("window size buffer"),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let window_size_buf = WindowSizeBuf::new(
+            device,
+            WindowSize {
+                size: [viewport.width() as f32, viewport.height() as f32],
+                cell_size,
+                column: crate::COLUMN,
+            },
+        );
 
         let mut allocator = ArrayAllocator::new(TEXTURE_WIDTH, TEXTURE_WIDTH);
 
@@ -326,7 +323,6 @@ impl CellContext {
             bind_group,
             glyph_cache,
             window_size_buf,
-            cell_size,
             font,
             font_size,
             font_descent: metrics.descent,
@@ -335,12 +331,10 @@ impl CellContext {
         }
     }
 
-    pub fn resize(&mut self, queue: &wgpu::Queue, width: u32, height: u32) {
-        queue.write_buffer(
-            &self.window_size_buf,
-            0,
-            bytemuck::cast_slice(&[width as f32, height as f32]),
-        );
+    pub fn resize(&mut self, queue: &wgpu::Queue, width: f32, height: f32) {
+        self.window_size_buf.update_size(queue, |size| {
+            size.size = [width, height];
+        });
     }
 
     pub fn set_terminal(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, term: &Terminal) {
@@ -362,7 +356,7 @@ impl CellContext {
         //     bytemuck::cast_slice(&[CellVertex { color: [1.0; 4] }]),
         // );
 
-        self.desired_height = screen.lines.len() as f32 * self.cell_size[1];
+        self.desired_height = screen.lines.len() as f32 * self.window_size_buf.cell_height();
 
         for (line_no, line) in screen.lines.iter().enumerate() {
             // if !line.changed_since(self.prev_term_seqno) {
@@ -386,16 +380,18 @@ impl CellContext {
                 // let s = &t[cluster.source.to_range()];
                 for (glyph, cell) in cluster.glyphs.iter().zip(cluster_cells) {
                     if let Some(info) = self.glyph_cache.get(&glyph.id) {
-                        let (r, g, b, _) = palette.resolve_fg(cell.attrs().foreground()).to_tuple_rgba();
+                        let (r, g, b, _) = palette
+                            .resolve_fg(cell.attrs().foreground())
+                            .to_tuple_rgba();
                         vertexes.push(TextVertex {
                             offset: [
                                 x + glyph.x + info.glyph_position[0],
-                                self.cell_size[1] * (line_no + 1) as f32
+                                self.window_size_buf.cell_height() * (line_no + 1) as f32
                                     - (info.glyph_position[1] + glyph.y + self.font_descent),
                             ],
                             tex_offset: info.tex_position,
                             tex_size: info.tex_size,
-                            color:  [r, g, b],
+                            color: [r, g, b],
                             layer: info.layer as i32,
                         });
                     }
@@ -467,10 +463,45 @@ fn create_cell_instance(count: usize) -> Vec<CellVertex> {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct WindowSize {
+struct WindowSize {
     size: [f32; 2],
     cell_size: [f32; 2],
     column: u32,
+}
+
+struct WindowSizeBuf {
+    buf: wgpu::Buffer,
+    size: WindowSize,
+}
+
+impl WindowSizeBuf {
+    pub fn new(device: &wgpu::Device, size: WindowSize) -> Self {
+        Self {
+            buf: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                contents: bytemuck::cast_slice(std::slice::from_ref(&size)),
+                label: Some("window_size buf"),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            }),
+            size,
+        }
+    }
+
+    pub fn as_entire_binding(&self) -> wgpu::BindingResource {
+        self.buf.as_entire_binding()
+    }
+
+    pub fn cell_height(&self) -> f32 {
+        self.size.cell_size[1]
+    }
+
+    pub fn update_size(&mut self, queue: &wgpu::Queue, f: impl FnOnce(&mut WindowSize)) {
+        f(&mut self.size);
+        queue.write_buffer(
+            &self.buf,
+            0,
+            bytemuck::cast_slice(std::slice::from_ref(&self.size)),
+        );
+    }
 }
 
 struct GlyphInfo {

@@ -91,10 +91,10 @@ impl WgpuContext {
             });
 
             let height = self.cell_ctx.desired_height().ceil().max(1.0);
-            self.cell_ctx
-                .resize(&self.queue, self.viewport.width(), height as _);
+            let width = self.viewport.width() as f32;
+            self.cell_ctx.resize(&self.queue, width, height as _);
             let top = (self.viewport.height() as f32 - height).min(0.0);
-            rpass.set_viewport(0.0, top, self.viewport.width() as f32, height, 0.0, 1.0);
+            rpass.set_viewport(0.0, top, width, height, 0.0, 1.0);
             rpass.set_scissor_rect(0, 0, self.viewport.width(), self.viewport.height());
             self.cell_ctx.draw(&mut rpass);
         }
