@@ -1,18 +1,17 @@
-use std::{mem::size_of, num::NonZeroU32, time::Instant};
+use std::num::NonZeroU32;
 
 use ahash::AHashMap;
 use bytemuck::{Pod, Zeroable};
-use rayon::prelude::*;
 use swash::{
     scale::{image::Image, Render, ScaleContext, Source, StrikeWith},
     shape::ShapeContext,
     FontRef,
 };
 use termwiz::surface::SequenceNo;
-use wgpu::util::DeviceExt;
+use wgpu_container::{WgpuCell, WgpuVec};
 
-use super::{wgpu_cell::WgpuCell, wgpu_vec::WgpuVec, Viewport};
 use crate::render::atals::ArrayAllocator;
+use crate::render::Viewport;
 use wezterm_term::Terminal;
 
 const TEXTURE_WIDTH: u32 = 1024;
@@ -338,7 +337,7 @@ impl CellContext {
         // );
 
         self.desired_height = screen.lines.len() as f32 * self.window_size.cell_size[1];
-        self.text_instances.as_vec_mut().clear();
+        self.text_instances.cpu_buffer_mut().clear();
 
         for (line_no, line) in screen.lines.iter().enumerate() {
             // if !line.changed_since(self.prev_term_seqno) {
@@ -365,7 +364,7 @@ impl CellContext {
                         let (r, g, b, _) = palette
                             .resolve_fg(cell.attrs().foreground())
                             .to_tuple_rgba();
-                        self.text_instances.as_vec_mut().push(TextVertex {
+                        self.text_instances.cpu_buffer_mut().push(TextVertex {
                             offset: [
                                 x + glyph.x + info.glyph_position[0],
                                 self.window_size.cell_size[1] * (line_no + 1) as f32
@@ -397,14 +396,14 @@ impl CellContext {
 
         rpass.push_debug_group("Draw cell");
         rpass.set_pipeline(&self.pipeline);
-        rpass.set_vertex_buffer(0, self.instances.slice(..));
-        rpass.draw(0..4, 0..self.instances.len());
+        rpass.set_vertex_buffer(0, self.instances.gpu_buffer().slice(..));
+        rpass.draw(0..4, 0..self.instances.len() as _);
         rpass.pop_debug_group();
 
         rpass.push_debug_group("Draw text");
         rpass.set_pipeline(&self.text_pipeline);
-        rpass.set_vertex_buffer(0, self.text_instances.slice(..));
-        rpass.draw(0..4, 0..self.text_instances.len());
+        rpass.set_vertex_buffer(0, self.text_instances.gpu_buffer().slice(..));
+        rpass.draw(0..4, 0..self.text_instances.len() as _);
         rpass.pop_debug_group();
     }
 }

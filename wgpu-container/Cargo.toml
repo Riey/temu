@@ -1,0 +1,13 @@
+[package]
+name = "wgpu-container"
+version = "0.1.0"
+edition = "2018"
+resolver = "2"
+# homepage = "https://github.com/Riey/wgpu-container"
+# repository = "https://github.com/Riey/wgpu-container"
+# documentation = "https://docs.rs/wgpu-container"
+keywords = ["wgpu", "container"]
+
+[dependencies]
+bytemuck = "1.7.2"
+wgpu = "0.11.0"

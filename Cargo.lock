@@ -1864,6 +1864,7 @@ dependencies = [
  "termwiz",
  "wezterm-term",
  "wgpu",
+ "wgpu-container",
 ]
 
 [[package]]
@@ -2291,6 +2292,14 @@ dependencies = [
  "wgpu-core",
  "wgpu-hal",
  "wgpu-types",
+]
+
+[[package]]
+name = "wgpu-container"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "wgpu",
 ]
 
 [[package]]
