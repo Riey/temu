@@ -234,7 +234,7 @@ impl CellContext {
         let mut data = vec![0; TEXTURE_SIZE * 2];
         let mut layer_count = 1;
 
-        let mut scaler = scale_ctx.builder(font).size(font_size).build();
+        let mut scaler = scale_ctx.builder(font).hint(true).size(font_size).build();
 
         font.charmap().enumerate(|_c, id| {
             image.clear();
