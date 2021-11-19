@@ -13,7 +13,5 @@ Toy teminal emulator (WIP)
 
 basic features but WIP
 
-- [ ] scrolling
-- [ ] ANSI escape(color, delete, ...)
 - [ ] copy/paste
 - [ ] shortcuts
