@@ -12,7 +12,7 @@ use wgpu_container::{WgpuCell, WgpuVec};
 
 use crate::render::atals::ArrayAllocator;
 use crate::render::Viewport;
-use wezterm_term::{ScrollbackOrVisibleRowIndex, StableRowIndex, Terminal, VisibleRowIndex};
+use wezterm_term::{StableRowIndex, Terminal};
 
 const TEXTURE_WIDTH: u32 = 1024;
 const TEXTURE_SIZE: usize = (TEXTURE_WIDTH * TEXTURE_WIDTH) as usize;
@@ -215,9 +215,13 @@ impl CellContext {
             device,
             wgpu::BufferUsages::UNIFORM,
             Ui {
-                cursor_pos: [0.0; 2],
-                _pad: [0.0; 2],
                 cursor_color: [1.0; 4],
+                cursor_pos: [0.0; 2],
+                scrollbar_width: 30.0,
+                scrollbar_height: 100.0,
+                scrollbar_top: 10.0,
+                scrollbar_bg: [1.0; 4],
+                scrollbar_fg: [0.6; 4],
             },
         );
 
@@ -398,7 +402,7 @@ impl CellContext {
         });
 
         self.desired_size = [
-            screen.physical_cols as f32 * self.window_size.cell_size[0],
+            screen.physical_cols as f32 * self.window_size.cell_size[0] + self.ui.scrollbar_width,
             screen.physical_rows as f32 * self.window_size.cell_size[1],
         ];
         self.instances.cpu_buffer_mut().resize(
@@ -413,10 +417,7 @@ impl CellContext {
         let end = self.scroll_offset + screen.physical_rows as StableRowIndex;
         let range = screen.stable_range(&(start..end));
 
-        for (line_no, line) in screen.lines.as_slices().0[range]
-            .iter()
-            .enumerate()
-        {
+        for (line_no, line) in screen.lines.as_slices().0[range].iter().enumerate() {
             // if !line.changed_since(self.prev_term_seqno) {
             //     continue;
             // }
@@ -484,7 +485,7 @@ impl CellContext {
         rpass.push_debug_group("Draw ui");
         rpass.set_pipeline(&self.ui_pipeline);
         // cursor
-        rpass.draw(0..4, 0..1);
+        rpass.draw(0..4, 0..2);
         rpass.pop_debug_group();
     }
 }
@@ -516,9 +517,13 @@ struct WindowSize {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct Ui {
-    cursor_pos: [f32; 2],
-    _pad: [f32; 2],
     cursor_color: [f32; 4],
+    cursor_pos: [f32; 2],
+    scrollbar_width: f32,
+    scrollbar_height: f32,
+    scrollbar_top: f32,
+    scrollbar_fg: [f32; 4],
+    scrollbar_bg: [f32; 4],
 }
 
 struct GlyphInfo {

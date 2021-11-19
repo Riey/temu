@@ -14,7 +14,7 @@ use crossbeam_channel::Receiver;
 use futures_executor::block_on;
 use temu_window::TemuEvent;
 use termwiz::escape::{parser::Parser, Action};
-use wezterm_term::{CellAttributes, KeyCode, Terminal, TerminalSize};
+use wezterm_term::{KeyCode, Terminal, TerminalSize};
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 
@@ -57,6 +57,7 @@ impl WgpuContext {
         log::trace!("Resize({}, {})", width, height);
 
         self.viewport.resize(&self.device, width, height);
+        self.cell_ctx.resize(&self.queue, width as _, height as _);
         // TODO: update scroll_state
     }
 
@@ -82,20 +83,26 @@ impl WgpuContext {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.1,
+                            b: 0.1,
+                            a: 1.0,
+                        }),
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: None,
             });
 
-            let [width, height] = self.cell_ctx.desired_size();
-            let width = width.ceil().max(1.0);
-            let height = height.ceil().max(1.0);
-            self.cell_ctx.resize(&self.queue, width as _, height as _);
-            let top = (self.viewport.height() as f32 - height).min(0.0);
-            rpass.set_viewport(0.0, top, width, height, 0.0, 1.0);
-            rpass.set_scissor_rect(0, 0, self.viewport.width(), self.viewport.height());
+            // let [width, height] = self.cell_ctx.desired_size();
+            // let width = width.ceil().max(1.0);
+            // let height = height.ceil().max(1.0);
+            // self.cell_ctx.resize(&self.queue, width as _, height as _);
+            // let top = (self.viewport.height() as f32 - height).min(0.0);
+            // rpass.set_viewport(0.0, top, width, height, 0.0, 1.0);
+            // rpass.set_scissor_rect(0, 0, self.viewport.width(), self.viewport.height());
+            // let top = (self.viewport.height() as f32 - height).min(0.0);
             self.cell_ctx.draw(&mut rpass);
         }
 

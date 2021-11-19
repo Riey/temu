@@ -7,14 +7,13 @@ struct WindowSizeUniform {
 
 [[block]]
 struct UiUniform {
-    cursor_pos: vec2<f32>;
-    pad: vec2<f32>;
     cursor_color: vec4<f32>;
-    // scrollbar_fg: vec4<f32>;
-    // scrollbar_bg: vec4<f32>;
-    // scrollbar_width: f32;
-    // scrollbar_top: f32;
-    // scrollbar_bottom: f32;
+    cursor_pos: vec2<f32>;
+    scrollbar_width: f32;
+    scrollbar_height: f32;
+    scrollbar_top: f32;
+    scrollbar_fg: vec4<f32>;
+    scrollbar_bg: vec4<f32>;
 };
 
 [[group(0), binding(0)]] var<uniform> window_size: WindowSizeUniform;
@@ -165,6 +164,17 @@ fn ui_vs(
             let pos = get_rect_position(rect, vertex_index);
 
             return CellOutput(vec4<f32>(pos, 1.0, 1.0), ui.cursor_color);
+        }
+        // scrollbar outer
+        case 1: {
+            let rect = Rect(
+                pixel_to_ndc(vec2<f32>(window_size.size.x - ui.scrollbar_width, 0.0)),
+                pixel_size_to_ndc(vec2<f32>(ui.scrollbar_width, window_size.size.y))
+            );
+            let pos = get_rect_position(rect, vertex_index);
+
+            // return CellOutput(vec4<f32>(pos, 1.0, 1.0), ui.scrollbar_bg);
+            return CellOutput(vec4<f32>(pos, 1.0, 1.0), vec4<f32>(1.0));
         }
         default: {
             // Unknown
