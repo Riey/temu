@@ -11,9 +11,10 @@ struct UiUniform {
     cursor_pos: vec2<f32>;
     scrollbar_width: f32;
     scrollbar_height: f32;
-    scrollbar_top: f32;
     scrollbar_fg: vec4<f32>;
     scrollbar_bg: vec4<f32>;
+    scrollbar_top: f32;
+    pad: vec3<f32>;
 };
 
 [[group(0), binding(0)]] var<uniform> window_size: WindowSizeUniform;
@@ -173,8 +174,19 @@ fn ui_vs(
             );
             let pos = get_rect_position(rect, vertex_index);
 
-            // return CellOutput(vec4<f32>(pos, 1.0, 1.0), ui.scrollbar_bg);
-            return CellOutput(vec4<f32>(pos, 1.0, 1.0), vec4<f32>(1.0));
+            return CellOutput(vec4<f32>(pos, 1.0, 1.0), ui.scrollbar_bg);
+            // return CellOutput(vec4<f32>(pos, 1.0, 1.0), vec4<f32>(1.0));
+        }
+        // scrollbar inner
+        case 2: {
+            let rect = Rect(
+                pixel_to_ndc(vec2<f32>(window_size.size.x - ui.scrollbar_width, ui.scrollbar_top)),
+                pixel_size_to_ndc(vec2<f32>(ui.scrollbar_width, ui.scrollbar_height))
+            );
+            let pos = get_rect_position(rect, vertex_index);
+
+            return CellOutput(vec4<f32>(pos, 1.0, 1.0), ui.scrollbar_fg);
+            // return CellOutput(vec4<f32>(pos, 1.0, 1.0), vec4<f32>(1.0));
         }
         default: {
             // Unknown

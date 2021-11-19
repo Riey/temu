@@ -220,6 +220,7 @@ impl CellContext {
                 scrollbar_width: 30.0,
                 scrollbar_height: 100.0,
                 scrollbar_top: 10.0,
+                pad: [0.0; 3],
                 scrollbar_bg: [1.0; 4],
                 scrollbar_fg: [0.6; 4],
             },
@@ -484,8 +485,8 @@ impl CellContext {
 
         rpass.push_debug_group("Draw ui");
         rpass.set_pipeline(&self.ui_pipeline);
-        // cursor
-        rpass.draw(0..4, 0..2);
+        // cursor, scrollbar outer, scrollbar inner
+        rpass.draw(0..4, 0..3);
         rpass.pop_debug_group();
     }
 }
@@ -521,10 +522,13 @@ struct Ui {
     cursor_pos: [f32; 2],
     scrollbar_width: f32,
     scrollbar_height: f32,
-    scrollbar_top: f32,
     scrollbar_fg: [f32; 4],
     scrollbar_bg: [f32; 4],
+    scrollbar_top: f32,
+    pad: [f32; 3],
 }
+
+static_assertions::assert_eq_size!(Ui, [f32; 20]);
 
 struct GlyphInfo {
     tex_position: [f32; 2],
