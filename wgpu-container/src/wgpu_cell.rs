@@ -31,11 +31,23 @@ impl<T: Pod> WgpuCell<T> {
         &self.inner
     }
 
+    /// Get mutable reference underlying value
+    ///
+    /// Caller should call [`WgpuCell::write`] to update gpu-buffer
+    pub fn as_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+
     /// Update inner value and write changes
     pub fn update<R>(&mut self, queue: &wgpu::Queue, f: impl FnOnce(&mut T) -> R) -> R {
         let ret = f(&mut self.value);
-        queue.write_buffer(&self.inner, 0, cast_slice(from_ref(&self.value)));
+        self.write(queue);
         ret
+    }
+
+    /// Write value to gpu-buffer
+    pub fn write(&mut self, queue: &wgpu::Queue) {
+        queue.write_buffer(&self.inner, 0, cast_slice(from_ref(&self.value)));
     }
 }
 
