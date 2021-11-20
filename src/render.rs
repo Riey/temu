@@ -5,7 +5,7 @@ mod viewport;
 use std::{
     io::{BufReader, Read},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use self::cell::CellContext;
@@ -158,11 +158,20 @@ pub fn run(
 
     let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
     let mut ctx = WgpuContext::new(viewport, device, queue, scale_factor);
+    let mut fps = fps_counter::FPSCounter::new();
+    let mut fps_showtime = Instant::now();
+    let always_redraw = true;
 
     loop {
-        if need_redraw {
+        if always_redraw || need_redraw {
             ctx.redraw();
-            need_redraw = false;
+            let cur_fps = fps.tick();
+            let now = Instant::now();
+            if now > fps_showtime {
+                fps_showtime = now + Duration::from_secs(1);
+                println!("{}FPS", cur_fps);
+            }
+            need_redraw = always_redraw;
         }
 
         if let Ok(msg) = msg_rx.try_recv() {
