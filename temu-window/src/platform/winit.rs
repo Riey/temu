@@ -54,47 +54,42 @@ impl crate::TemuWindow for WinitWindow {
             event_tx,
         } = self;
 
-        event_loop.run(move |e, _target, flow| {
-            *flow = ControlFlow::Wait;
-            match e {
-                Event::RedrawRequested(_) => {
-                    event_tx.send(TemuEvent::Redraw).ok();
+        event_loop.run(move |e, _target, flow| match e {
+            Event::DeviceEvent { .. } => *flow = ControlFlow::Wait,
+            Event::RedrawRequested(_) => {
+                event_tx.send(TemuEvent::Redraw).ok();
+            }
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CloseRequested => {
+                    event_tx.send(TemuEvent::Close).ok();
+                    *flow = ControlFlow::Exit;
                 }
-                Event::WindowEvent { event, .. } => match event {
-                    WindowEvent::CloseRequested => {
-                        event_tx.send(TemuEvent::Close).ok();
-                        *flow = ControlFlow::Exit;
-                    }
-                    WindowEvent::Resized(size) => {
-                        event_tx
-                            .send(TemuEvent::Resize {
-                                width: size.width,
-                                height: size.height,
-                            })
-                            .ok();
-                        *flow = ControlFlow::Poll;
-                    }
-                    WindowEvent::ReceivedCharacter(c) => {
-                        event_tx.send(TemuEvent::Char(c)).ok();
-                        *flow = ControlFlow::Poll;
-                    }
-                    WindowEvent::MouseWheel { delta, .. } => match delta {
-                        MouseScrollDelta::LineDelta(_, y) => {
-                            *flow = ControlFlow::Poll;
-                            if y > 0.0 {
-                                event_tx.send(TemuEvent::ScrollUp).ok();
-                            } else if y < 0.0 {
-                                event_tx.send(TemuEvent::ScrollDown).ok();
-                            }
+                WindowEvent::Resized(size) => {
+                    event_tx
+                        .send(TemuEvent::Resize {
+                            width: size.width,
+                            height: size.height,
+                        })
+                        .ok();
+                }
+                WindowEvent::ReceivedCharacter(c) => {
+                    event_tx.send(TemuEvent::Char(c)).ok();
+                }
+                WindowEvent::MouseWheel { delta, .. } => match delta {
+                    MouseScrollDelta::LineDelta(_, y) => {
+                        if y > 0.0 {
+                            event_tx.send(TemuEvent::ScrollUp).ok();
+                        } else if y < 0.0 {
+                            event_tx.send(TemuEvent::ScrollDown).ok();
                         }
-                        MouseScrollDelta::PixelDelta(p) => {
-                            log::info!("{:?}", p);
-                        }
-                    },
-                    _ => {}
+                    }
+                    MouseScrollDelta::PixelDelta(p) => {
+                        log::info!("{:?}", p);
+                    }
                 },
                 _ => {}
-            }
+            },
+            _ => {}
         });
     }
 }
