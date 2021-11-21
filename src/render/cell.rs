@@ -618,9 +618,11 @@ struct Ui {
 impl Ui {
     pub fn target(&self, [width, height]: [f32; 2], x: f32, y: f32) -> MouseTarget {
         let scrollbar_left = width - self.scrollbar_width;
+        let y_ndc = 1.0 - (y * 2.0 / height);
 
-        // TODO: check y
-        let cursor_in_scrollbar = x >= scrollbar_left;
+        let cursor_in_scrollbar = x >= scrollbar_left
+            && y_ndc <= self.scrollbar_top
+            && y_ndc >= (self.scrollbar_top + self.scrollbar_height);
 
         if cursor_in_scrollbar {
             MouseTarget::ScrollBar
