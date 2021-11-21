@@ -6,6 +6,7 @@ use wgpu::util::DeviceExt;
 pub struct WgpuCell<T> {
     value: T,
     inner: wgpu::Buffer,
+    outdated: bool,
 }
 
 impl<T: Pod> WgpuCell<T> {
@@ -18,6 +19,7 @@ impl<T: Pod> WgpuCell<T> {
                 usage: usage | wgpu::BufferUsages::COPY_DST,
             }),
             value,
+            outdated: false,
         }
     }
 
@@ -35,19 +37,25 @@ impl<T: Pod> WgpuCell<T> {
     ///
     /// Caller should call [`WgpuCell::write`] to update gpu-buffer
     pub fn as_mut(&mut self) -> &mut T {
+        self.outdated = true;
         &mut self.value
     }
 
     /// Update inner value and write changes
-    pub fn update<R>(&mut self, queue: &wgpu::Queue, f: impl FnOnce(&mut T) -> R) -> R {
-        let ret = f(&mut self.value);
-        self.write(queue);
-        ret
+    pub fn update<'a, 'b: 'a, R>(&'b mut self, f: impl FnOnce(&'a mut T) -> R) -> R {
+        self.outdated = true;
+        f(&mut self.value)
     }
 
     /// Write value to gpu-buffer
-    pub fn write(&mut self, queue: &wgpu::Queue) {
-        queue.write_buffer(&self.inner, 0, cast_slice(from_ref(&self.value)));
+    ///
+    /// If buffer is up to date, it won't do write
+    pub fn flush(&mut self, queue: &wgpu::Queue) {
+        if self.outdated {
+            queue.write_buffer(&self.inner, 0, cast_slice(from_ref(&self.value)));
+        }
+
+        self.outdated = false;
     }
 }
 

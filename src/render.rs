@@ -5,7 +5,7 @@ mod viewport;
 use std::{
     io::{BufReader, Read},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use self::cell::CellContext;
@@ -36,7 +36,7 @@ impl WgpuContext {
         queue: wgpu::Queue,
         scale_factor: f32,
     ) -> Self {
-        let cell_ctx = CellContext::new(&device, &queue, &viewport, FONT_SIZE * scale_factor);
+        let cell_ctx = CellContext::new(&device, &queue, &viewport, FONT_SIZE, scale_factor);
 
         Self {
             cell_ctx,
@@ -51,7 +51,7 @@ impl WgpuContext {
         log::trace!("Resize({}, {})", width, height);
 
         self.viewport.resize(&self.device, width, height);
-        self.cell_ctx.resize(&self.queue, width as _, height as _);
+        self.cell_ctx.resize(width as _, height as _);
         // TODO: update scroll_state
     }
 
@@ -97,7 +97,7 @@ impl WgpuContext {
             // rpass.set_viewport(0.0, top, width, height, 0.0, 1.0);
             // rpass.set_scissor_rect(0, 0, self.viewport.width(), self.viewport.height());
             // let top = (self.viewport.height() as f32 - height).min(0.0);
-            self.cell_ctx.draw(&mut rpass);
+            self.cell_ctx.draw(&self.queue, &mut rpass);
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -154,23 +154,26 @@ pub fn run(
     ))
     .expect("Failed to create device");
 
-    let mut prev_resize = (width, height);
+    let mut current_size = (width, height);
 
-    let viewport = Viewport::new(prev_resize.0, prev_resize.1, &adapter, &device, surface);
+    let viewport = Viewport::new(current_size.0, current_size.1, &adapter, &device, surface);
     let mut ctx = WgpuContext::new(viewport, device, queue, scale_factor);
-    let mut fps = fps_counter::FPSCounter::new();
-    let mut fps_showtime = Instant::now();
-    let always_redraw = true;
+    // let mut fps = fps_counter::FPSCounter::new();
+    // let mut fps_showtime = Instant::now();
+    let always_redraw = false;
+    let mut cursor_pos = (0.0, 0.0);
+    let mut pressed = false;
+    let mut dragged = false;
 
     loop {
         if always_redraw || need_redraw {
             ctx.redraw();
-            let cur_fps = fps.tick();
-            let now = Instant::now();
-            if now > fps_showtime {
-                fps_showtime = now + Duration::from_secs(1);
-                println!("{}FPS", cur_fps);
-            }
+            // let cur_fps = fps.tick();
+            // let now = Instant::now();
+            // if now > fps_showtime {
+            //     fps_showtime = now + Duration::from_secs(1);
+            //     println!("{}FPS", cur_fps);
+            // }
             need_redraw = always_redraw;
         }
 
@@ -196,11 +199,38 @@ pub fn run(
                     if width == 0 || height == 0 {
                         continue;
                     }
-                    if prev_resize != (width, height) {
+                    if current_size != (width, height) {
                         ctx.resize(width, height);
                         // need_redraw = true;
-                        prev_resize = (width, height);
+                        current_size = (width, height);
                     }
+                }
+                TemuEvent::CursorMove { x, y } => {
+                    if pressed {
+                        if ctx.cell_ctx.drag(x, y) {
+                            need_redraw = true;
+                        }
+                        dragged = true;
+                    } else {
+                        if ctx.cell_ctx.hover(x, y) {
+                            need_redraw = true;
+                        }
+                    }
+
+                    cursor_pos = (x, y);
+                }
+                TemuEvent::Left(true) => {
+                    pressed = true;
+                }
+                TemuEvent::Left(false) => {
+                    if dragged {
+                        ctx.cell_ctx.drag_end();
+                    } else {
+                        ctx.cell_ctx.click(cursor_pos.0, cursor_pos.1);
+                    }
+                    need_redraw = true;
+                    dragged = false;
+                    pressed = false;
                 }
                 TemuEvent::Redraw => {
                     need_redraw = true;

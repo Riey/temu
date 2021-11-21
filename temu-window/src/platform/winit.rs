@@ -1,7 +1,7 @@
 use crossbeam_channel::Sender;
 use raw_window_handle::HasRawWindowHandle;
 use winit::dpi::LogicalSize;
-use winit::event::{Event, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowBuilder};
 
@@ -74,6 +74,23 @@ impl crate::TemuWindow for WinitWindow {
                 }
                 WindowEvent::ReceivedCharacter(c) => {
                     event_tx.send(TemuEvent::Char(c)).ok();
+                }
+                WindowEvent::MouseInput {
+                    button: MouseButton::Left,
+                    state,
+                    ..
+                } => {
+                    event_tx
+                        .send(TemuEvent::Left(state == ElementState::Pressed))
+                        .ok();
+                }
+                WindowEvent::CursorMoved { position, .. } => {
+                    event_tx
+                        .send(TemuEvent::CursorMove {
+                            x: position.x as f32,
+                            y: position.y as f32,
+                        })
+                        .ok();
                 }
                 WindowEvent::MouseWheel { delta, .. } => match delta {
                     MouseScrollDelta::LineDelta(_, y) => {

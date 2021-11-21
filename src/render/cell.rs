@@ -1,4 +1,4 @@
-use std::num::NonZeroU32;
+use std::{mem, num::NonZeroU32};
 
 use ahash::AHashMap;
 use bytemuck::{Pod, Zeroable};
@@ -16,6 +16,8 @@ use wezterm_term::{StableRowIndex, Terminal};
 
 const TEXTURE_WIDTH: u32 = 1024;
 const TEXTURE_SIZE: usize = (TEXTURE_WIDTH * TEXTURE_WIDTH) as usize;
+const SCROLLBAR_FOCUSED: [f32; 4] = [0.2, 0.2, 0.2, 1.0];
+const SCROLLBAR_UNFOCUSED: [f32; 4] = [0.6, 0.6, 0.6, 1.0];
 
 pub struct CellContext {
     pipeline: wgpu::RenderPipeline,
@@ -33,6 +35,7 @@ pub struct CellContext {
     shape_ctx: ShapeContext,
     prev_term_seqno: SequenceNo,
     scroll_offset: StableRowIndex,
+    mouse_status: MouseStatus,
 }
 
 impl CellContext {
@@ -41,8 +44,9 @@ impl CellContext {
         queue: &wgpu::Queue,
         viewport: &Viewport,
         font_size: f32,
+        scale_factor: f32,
     ) -> Self {
-        let font_size = font_size;
+        let font_size = font_size * scale_factor;
 
         let font = FontRef::from_index(super::FONT, 0).unwrap();
 
@@ -216,10 +220,10 @@ impl CellContext {
             Ui {
                 cursor_color: [1.0; 4],
                 cursor_pos: [0.0; 2],
-                scrollbar_width: 30.0,
+                scrollbar_width: 15.0 * scale_factor,
                 scrollbar_height: 2.0,
                 scrollbar_bg: [1.0; 4],
-                scrollbar_fg: [0.5, 0.5, 0.5, 1.0],
+                scrollbar_fg: SCROLLBAR_UNFOCUSED,
                 scrollbar_top: -1.0,
                 pad: [0.0; 3],
             },
@@ -365,11 +369,98 @@ impl CellContext {
             pipeline,
             text_pipeline,
             ui_pipeline,
+            mouse_status: MouseStatus::default(),
         }
     }
 
-    pub fn resize(&mut self, queue: &wgpu::Queue, width: f32, height: f32) {
-        self.window_size.update(queue, |size| {
+    pub fn click(&mut self, _x: f32, _y: f32) -> bool {
+        false
+    }
+
+    pub fn hover(&mut self, x: f32, y: f32) -> bool {
+        let target = self.ui.target(self.window_size.size, x, y);
+
+        match self.mouse_status {
+            MouseStatus::Hover(ref mut old_target) => {
+                if *old_target == target {
+                    false
+                } else {
+                    match target {
+                        MouseTarget::Empty => {
+                            self.ui.update(|ui| {
+                                ui.scrollbar_fg = SCROLLBAR_UNFOCUSED;
+                            });
+                        }
+                        MouseTarget::ScrollBar => {
+                            self.ui.update(|ui| {
+                                ui.scrollbar_fg = SCROLLBAR_FOCUSED;
+                            });
+                        }
+                    }
+
+                    *old_target = target;
+
+                    true
+                }
+            }
+            MouseStatus::Drag { .. } => unreachable!(),
+        }
+    }
+
+    pub fn drag_end(&mut self) {
+        match mem::take(&mut self.mouse_status) {
+            MouseStatus::Hover(_) => unreachable!(),
+            MouseStatus::Drag { target, .. } => match target {
+                MouseTarget::Empty => {}
+                MouseTarget::ScrollBar => {
+                    self.ui.update(|ui| {
+                        ui.scrollbar_fg = SCROLLBAR_UNFOCUSED;
+                    });
+                }
+            },
+        }
+    }
+
+    pub fn drag(&mut self, x: f32, y: f32) -> bool {
+        let target = self.ui.target(self.window_size.size, x, y);
+
+        match self.mouse_status {
+            MouseStatus::Hover(_) => {
+                match target {
+                    MouseTarget::ScrollBar => {
+                        self.ui.update(|ui| {
+                            ui.scrollbar_fg = SCROLLBAR_FOCUSED;
+                        });
+                    }
+                    MouseTarget::Empty => {
+                        self.ui.update(|ui| {
+                            ui.scrollbar_fg = SCROLLBAR_UNFOCUSED;
+                        });
+                    }
+                }
+                self.mouse_status = MouseStatus::Drag {
+                    target,
+                    current: (x, y),
+                    start: (x, y),
+                };
+                true
+            }
+            MouseStatus::Drag {
+                ref mut current, ..
+            } => {
+                let new_current = (x, y);
+                if *current != new_current {
+                    *current = new_current;
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    pub fn resize(&mut self, width: f32, height: f32) {
+        self.window_size.update(|size| {
             size.size = [width, height];
         });
     }
@@ -404,7 +495,7 @@ impl CellContext {
         let end = self.scroll_offset + screen.physical_rows as StableRowIndex;
         let range = screen.stable_range(&(start..end));
 
-        self.ui.update(queue, |ui| {
+        self.ui.update(|ui| {
             ui.cursor_pos = [
                 term.cursor_pos().x as _,
                 screen.phys_row(term.cursor_pos().y) as _,
@@ -461,7 +552,10 @@ impl CellContext {
         self.prev_term_seqno = term.current_seqno();
     }
 
-    pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) {
+    pub fn draw<'a>(&'a mut self, queue: &wgpu::Queue, rpass: &mut wgpu::RenderPass<'a>) {
+        self.window_size.flush(queue);
+        self.ui.flush(queue);
+
         rpass.set_bind_group(0, &self.bind_group, &[]);
 
         rpass.push_debug_group("Draw cell");
@@ -521,6 +615,21 @@ struct Ui {
     pad: [f32; 3],
 }
 
+impl Ui {
+    pub fn target(&self, [width, height]: [f32; 2], x: f32, y: f32) -> MouseTarget {
+        let scrollbar_left = width - self.scrollbar_width;
+
+        // TODO: check y
+        let cursor_in_scrollbar = x >= scrollbar_left;
+
+        if cursor_in_scrollbar {
+            MouseTarget::ScrollBar
+        } else {
+            MouseTarget::Empty
+        }
+    }
+}
+
 static_assertions::assert_eq_size!(Ui, [f32; 20]);
 
 struct GlyphInfo {
@@ -528,4 +637,26 @@ struct GlyphInfo {
     glyph_position: [f32; 2],
     tex_size: [f32; 2],
     layer: i32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MouseTarget {
+    Empty,
+    ScrollBar,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum MouseStatus {
+    Hover(MouseTarget),
+    Drag {
+        target: MouseTarget,
+        start: (f32, f32),
+        current: (f32, f32),
+    },
+}
+
+impl Default for MouseStatus {
+    fn default() -> Self {
+        Self::Hover(MouseTarget::Empty)
+    }
 }
