@@ -47,6 +47,7 @@ impl crate::TemuWindow for WinitWindow {
         self.inner.scale_factor() as f32
     }
 
+    #[profiling::function]
     fn run(self) {
         let Self {
             inner: _,

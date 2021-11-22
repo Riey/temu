@@ -9,6 +9,7 @@ default = ["winit"]
 [dependencies]
 crossbeam-channel = "0.5.1"
 log = "0.4.14"
+profiling = "1.0.4"
 raw-window-handle = "0.3.3"
 winit = { git = "https://github.com/rust-windowing/winit", optional = true, default-features = false, features = ["x11", "wayland"] }
 

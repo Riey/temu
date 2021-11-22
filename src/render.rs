@@ -2,18 +2,14 @@ mod atlas;
 mod cell;
 mod viewport;
 
-use std::{
-    io::{BufReader, Read},
-    sync::Arc,
-    time::Instant,
-};
+use std::{io::Write, sync::Arc, time::Instant};
 
 use self::cell::CellContext;
 pub use self::viewport::Viewport;
 use crossbeam_channel::Receiver;
 use futures_executor::block_on;
 use temu_window::TemuEvent;
-use termwiz::escape::{parser::Parser, Action};
+use termwiz::escape::Action;
 use wezterm_term::{KeyCode, Terminal, TerminalSize};
 
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
@@ -109,13 +105,10 @@ pub fn run(
     height: u32,
     scale_factor: f32,
     event_rx: Receiver<TemuEvent>,
+    msg_rx: Receiver<Vec<Action>>,
+    output: Box<dyn Write + Send>,
 ) {
     profiling::register_thread!("Renderer");
-    let (master, _shell) = crate::term::start_pty();
-    let input = master.try_clone_reader().unwrap();
-
-    let msg_rx = run_reader(input);
-    let output = master.try_clone_writer().unwrap();
 
     let mut terminal = Terminal::new(
         TerminalSize {
@@ -250,39 +243,4 @@ pub fn run(
 
         profiling::finish_frame!();
     }
-}
-
-fn run_reader(input: Box<dyn Read + Send>) -> Receiver<Vec<Action>> {
-    let (tx, rx) = crossbeam_channel::bounded(512);
-
-    std::thread::spawn(move || {
-        profiling::register_thread!("Reader");
-        let mut parser = Parser::new();
-        let mut reader = BufReader::new(input);
-        let mut buf = [0; 8196];
-
-        loop {
-            profiling::scope!("Read");
-            match reader.read(&mut buf) {
-                Ok(0) => {
-                    log::info!("pty input ended");
-                    return;
-                }
-                Ok(len) => {
-                    profiling::scope!("Parse");
-                    let actions = parser.parse_as_vec(&buf[..len]);
-                    tx.send(actions).unwrap();
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {
-                    continue;
-                }
-                Err(err) => {
-                    log::error!("IO error: {}", err);
-                    return;
-                }
-            }
-        }
-    });
-
-    rx
 }

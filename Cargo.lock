@@ -1887,6 +1887,7 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "log",
+ "profiling",
  "raw-window-handle",
  "windows",
  "winit",

@@ -13,6 +13,7 @@ pub trait TemuWindow: raw_window_handle::HasRawWindowHandle {
     fn run(self);
 }
 
+#[profiling::function]
 pub fn init_native_window(event_tx: Sender<event::TemuEvent>) -> impl TemuWindow {
     self::platform::NativeWindow::init(event_tx)
 }
