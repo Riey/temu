@@ -19,7 +19,7 @@ impl Viewport {
             format: render_format,
             width,
             height,
-            present_mode: wgpu::PresentMode::Immediate,
+            present_mode: wgpu::PresentMode::Mailbox,
         };
 
         surface.configure(device, &config);
