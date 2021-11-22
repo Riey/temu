@@ -8,7 +8,16 @@ pub struct TerminalConfig;
 impl TerminalConfiguration for TerminalConfig {
     fn color_palette(&self) -> ColorPalette {
         ColorPalette {
-            background: RgbColor::new_f32(0.1, 0.1, 0.1),
+            background: RgbColor::new_f32(
+                crate::DEFAULT_BG[0],
+                crate::DEFAULT_BG[1],
+                crate::DEFAULT_BG[2],
+            ),
+            foreground: RgbColor::new_f32(
+                crate::DEFAULT_TEXT[0],
+                crate::DEFAULT_TEXT[1],
+                crate::DEFAULT_TEXT[2],
+            ),
             ..Default::default()
         }
     }

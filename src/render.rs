@@ -79,10 +79,10 @@ impl WgpuContext {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.1,
-                            b: 0.1,
-                            a: 1.0,
+                            r: crate::DEFAULT_BG[0] as _,
+                            g: crate::DEFAULT_BG[1] as _,
+                            b: crate::DEFAULT_BG[2] as _,
+                            a: crate::DEFAULT_BG[3] as _,
                         }),
                         store: true,
                     },
@@ -90,14 +90,6 @@ impl WgpuContext {
                 depth_stencil_attachment: None,
             });
 
-            // let [width, height] = self.cell_ctx.desired_size();
-            // let width = width.ceil().max(1.0);
-            // let height = height.ceil().max(1.0);
-            // self.cell_ctx.resize(&self.queue, width as _, height as _);
-            // let top = (self.viewport.height() as f32 - height).min(0.0);
-            // rpass.set_viewport(0.0, top, width, height, 0.0, 1.0);
-            // rpass.set_scissor_rect(0, 0, self.viewport.width(), self.viewport.height());
-            // let top = (self.viewport.height() as f32 - height).min(0.0);
             self.cell_ctx.draw(&self.queue, &mut rpass);
         }
 

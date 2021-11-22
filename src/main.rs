@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 mod render;
 mod term;
 
@@ -5,6 +7,8 @@ use temu_window::{init_native_window, TemuWindow};
 
 const COLUMN: u32 = 80;
 const ROW: u32 = 23;
+const DEFAULT_BG: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+const DEFAULT_TEXT: [f32; 3] = [1.0, 1.0, 1.0];
 
 fn main() {
     profiling::register_thread!("Main Thread");
