@@ -373,10 +373,12 @@ impl CellContext {
         }
     }
 
+    #[profiling::function]
     pub fn click(&mut self, _x: f32, _y: f32) -> bool {
         false
     }
 
+    #[profiling::function]
     pub fn hover(&mut self, x: f32, y: f32) -> bool {
         let target = self.ui.target(self.window_size.size, x, y);
 
@@ -407,6 +409,7 @@ impl CellContext {
         }
     }
 
+    #[profiling::function]
     pub fn drag_end(&mut self) {
         match mem::take(&mut self.mouse_status) {
             MouseStatus::Hover(_) => unreachable!(),
@@ -421,6 +424,7 @@ impl CellContext {
         }
     }
 
+    #[profiling::function]
     pub fn drag(&mut self, x: f32, y: f32) -> bool {
         let target = self.ui.target(self.window_size.size, x, y);
 
@@ -465,6 +469,7 @@ impl CellContext {
         });
     }
 
+    #[profiling::function]
     pub fn scroll(&mut self, offset: StableRowIndex, term: &Terminal) {
         let screen = term.screen();
         let min = 0;
@@ -476,6 +481,7 @@ impl CellContext {
         self.scroll_offset = term.screen().visible_row_to_stable_row(0);
     }
 
+    #[profiling::function]
     pub fn set_terminal(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, term: &Terminal) {
         let screen = term.screen();
 
@@ -552,6 +558,7 @@ impl CellContext {
         self.prev_term_seqno = term.current_seqno();
     }
 
+    #[profiling::function]
     pub fn draw<'a>(&'a mut self, queue: &wgpu::Queue, rpass: &mut wgpu::RenderPass<'a>) {
         self.window_size.flush(queue);
         self.ui.flush(queue);

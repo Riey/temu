@@ -17,9 +17,9 @@ impl Viewport {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: render_format,
-            width: width.max(300),
-            height: height.max(200),
-            present_mode: wgpu::PresentMode::Mailbox,
+            width,
+            height,
+            present_mode: wgpu::PresentMode::Immediate,
         };
 
         surface.configure(device, &config);

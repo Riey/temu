@@ -7,6 +7,7 @@ const COLUMN: u32 = 80;
 const ROW: u32 = 23;
 
 fn main() {
+    profiling::register_thread!("Main Thread");
     let (event_tx, event_rx) = crossbeam_channel::bounded(64);
 
     env_logger::init();

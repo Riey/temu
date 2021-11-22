@@ -1472,6 +1472,20 @@ name = "profiling"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9926767b8b8244d7b6b64546585121d193c3d0b4856ccd656b7bfa9deb91ab6a"
+dependencies = [
+ "profiling-procmacros",
+ "superluminal-perf",
+]
+
+[[package]]
+name = "profiling-procmacros"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f899bc77213a95c5b7272c1f9889c1948eacafe06b035e976abbcadbb34fe517"
+dependencies = [
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "quote"
@@ -1816,6 +1830,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6446ced80d6c486436db5c078dde11a9f73d42b57fb273121e160b84f63d894c"
 
 [[package]]
+name = "superluminal-perf"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80ed8ddf5d2a4a849fa7dc75b3e0be740adb882fe7fee87e79584402ac9b1e60"
+dependencies = [
+ "superluminal-perf-sys",
+]
+
+[[package]]
+name = "superluminal-perf-sys"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0342a02bcc62538822a46f54294130677f026666c2e19d078fc213b7bc07ff16"
+
+[[package]]
 name = "svg_fmt"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1857,6 +1886,7 @@ dependencies = [
  "futures-executor",
  "log",
  "portable-pty",
+ "profiling",
  "rayon",
  "static_assertions",
  "swash",

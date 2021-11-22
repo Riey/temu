@@ -55,6 +55,7 @@ impl WgpuContext {
         // TODO: update scroll_state
     }
 
+    #[profiling::function]
     pub fn redraw(&mut self) {
         let start = Instant::now();
 
@@ -117,6 +118,7 @@ pub fn run(
     scale_factor: f32,
     event_rx: Receiver<TemuEvent>,
 ) {
+    profiling::register_thread!("Renderer");
     let (master, _shell) = crate::term::start_pty();
     let input = master.try_clone_reader().unwrap();
 
@@ -166,18 +168,10 @@ pub fn run(
     let mut dragged = false;
 
     loop {
-        if always_redraw || need_redraw {
-            ctx.redraw();
-            // let cur_fps = fps.tick();
-            // let now = Instant::now();
-            // if now > fps_showtime {
-            //     fps_showtime = now + Duration::from_secs(1);
-            //     println!("{}FPS", cur_fps);
-            // }
-            need_redraw = always_redraw;
-        }
+        profiling::scope!("Render loop");
 
         if let Ok(msg) = msg_rx.try_recv() {
+            profiling::scope!("Process actions");
             terminal.perform_actions(msg);
             ctx.cell_ctx.scroll_to_bottom(&terminal);
             ctx.cell_ctx
@@ -188,6 +182,7 @@ pub fn run(
         match event_rx.try_recv() {
             Ok(event) => match event {
                 TemuEvent::Char(c) => {
+                    profiling::scope!("Write char");
                     terminal
                         .key_down(KeyCode::Char(c), Default::default())
                         .unwrap();
@@ -200,6 +195,7 @@ pub fn run(
                         continue;
                     }
                     if current_size != (width, height) {
+                        profiling::scope!("Resize");
                         ctx.resize(width, height);
                         // need_redraw = true;
                         current_size = (width, height);
@@ -253,10 +249,24 @@ pub fn run(
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {
                 if !need_redraw {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    profiling::scope!("Sleep");
+                    std::thread::sleep(std::time::Duration::from_millis(5));
                 }
             }
         }
+
+        if always_redraw || need_redraw {
+            ctx.redraw();
+            // let cur_fps = fps.tick();
+            // let now = Instant::now();
+            // if now > fps_showtime {
+            //     fps_showtime = now + Duration::from_secs(1);
+            //     println!("{}FPS", cur_fps);
+            // }
+            need_redraw = always_redraw;
+        }
+
+        profiling::finish_frame!();
     }
 }
 
@@ -264,17 +274,20 @@ fn run_reader(input: Box<dyn Read + Send>) -> Receiver<Vec<Action>> {
     let (tx, rx) = crossbeam_channel::bounded(512);
 
     std::thread::spawn(move || {
+        profiling::register_thread!("Reader");
         let mut parser = Parser::new();
         let mut reader = BufReader::new(input);
         let mut buf = [0; 8196];
 
         loop {
+            profiling::scope!("Read");
             match reader.read(&mut buf) {
                 Ok(0) => {
                     log::info!("pty input ended");
                     return;
                 }
                 Ok(len) => {
+                    profiling::scope!("Parse");
                     let actions = parser.parse_as_vec(&buf[..len]);
                     tx.send(actions).unwrap();
                 }
