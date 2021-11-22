@@ -182,7 +182,6 @@ pub fn run(
             recv(event_rx) -> event => {
                 match event.unwrap() {
                     TemuEvent::Char(c) => {
-                        profiling::scope!("Write char");
                         terminal
                             .key_down(KeyCode::Char(c), Default::default())
                             .unwrap();
@@ -195,7 +194,6 @@ pub fn run(
                             continue;
                         }
                         if current_size != (width, height) {
-                            profiling::scope!("Resize");
                             ctx.resize(width, height);
                             // need_redraw = true;
                             current_size = (width, height);
@@ -248,7 +246,6 @@ pub fn run(
         };
 
         if always_redraw || need_redraw {
-            profiling::scope!("Redraw");
             ctx.redraw();
             // let cur_fps = fps.tick();
             // let now = Instant::now();

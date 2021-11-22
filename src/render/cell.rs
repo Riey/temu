@@ -2,12 +2,13 @@ use std::{mem, num::NonZeroU32};
 
 use ahash::AHashMap;
 use bytemuck::{Pod, Zeroable};
+// use rayon::prelude::*;
 use swash::{
     scale::{image::Image, Render, ScaleContext, Source, StrikeWith},
     shape::ShapeContext,
     FontRef,
 };
-use termwiz::surface::SequenceNo;
+use termwiz::{color::ColorAttribute, surface::SequenceNo};
 use wgpu_container::{WgpuCell, WgpuVec};
 
 use crate::render::atlas::ArrayAllocator;
@@ -122,6 +123,8 @@ impl CellContext {
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
                         0 => Float32x4,
+                        1 => Float32x2,
+                        2 => Float32x2,
                     ],
                 }],
             },
@@ -484,73 +487,99 @@ impl CellContext {
     #[profiling::function]
     pub fn set_terminal(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, term: &Terminal) {
         let screen = term.screen();
+        let palette = term.get_config().color_palette();
 
         // self.desired_size = [
         //     screen.physical_cols as f32 * self.window_size.cell_size[0] + self.ui.scrollbar_width,
         //     screen.physical_rows as f32 * self.window_size.cell_size[1],
         // ];
-        self.instances.cpu_buffer_mut().resize(
-            screen.physical_cols * screen.physical_rows,
-            CellVertex {
-                color: [0.1, 0.1, 0.1, 1.0],
-            },
-        );
-        self.text_instances.cpu_buffer_mut().clear();
+        let cell_size = self.window_size.cell_size;
 
-        let start = self.scroll_offset;
-        let end = self.scroll_offset + screen.physical_rows as StableRowIndex;
-        let range = screen.stable_range(&(start..end));
+        {
+            profiling::scope!("Make cell instances");
+            let lines = screen.lines.as_slices().0;
+            let cells = (0..screen.physical_cols)
+                .into_iter()
+                .zip(0..screen.physical_rows)
+                .filter_map(|(x, y)| {
+                    let cell = lines[y].cells().get(x)?;
 
-        self.ui.update(|ui| {
-            ui.cursor_pos = [
-                term.cursor_pos().x as _,
-                screen.phys_row(term.cursor_pos().y) as _,
-            ];
-            let full_height = screen.lines.as_slices().0.len() as f32;
-
-            ui.scrollbar_top = 1.0 - (range.start as f32 / full_height) * 2.0;
-            ui.scrollbar_height = -(range.len() as f32 / full_height) * 2.0;
-        });
-
-        for (line_no, line) in screen.lines.as_slices().0[range].iter().enumerate() {
-            // if !line.changed_since(self.prev_term_seqno) {
-            //     continue;
-            // }
-            let mut x = 0.0;
-            let mut shaper = self
-                .shape_ctx
-                .builder(self.font)
-                .size(self.font_size)
-                .build();
-            let s = line.as_str();
-            shaper.add_str(&s);
-            let mut cells = line.cells();
-            let palette = term.get_config().color_palette();
-
-            shaper.shape_with(|cluster| {
-                let (cluster_cells, new_cells) = cells.split_at(cluster.glyphs.len());
-                cells = new_cells;
-                // let s = &s[cluster.source.to_range()];
-                for (glyph, cell) in cluster.glyphs.iter().zip(cluster_cells) {
-                    if let Some(info) = self.glyph_cache.get(&glyph.id) {
-                        let (r, g, b, _) = palette
-                            .resolve_fg(cell.attrs().foreground())
-                            .to_tuple_rgba();
-                        self.text_instances.cpu_buffer_mut().push(TextVertex {
-                            offset: [
-                                x + glyph.x + info.glyph_position[0],
-                                self.window_size.cell_size[1] * (line_no + 1) as f32
-                                    - (info.glyph_position[1] + glyph.y + self.font_descent),
-                            ],
-                            tex_offset: info.tex_position,
-                            tex_size: info.tex_size,
-                            color: [r, g, b],
-                            layer: info.layer as i32,
-                        });
+                    if cell.attrs().background() != ColorAttribute::Default {
+                        let cell_pos = [x as f32 * cell_size[0], y as f32 * cell_size[1]];
+                        let color = palette.resolve_bg(cell.attrs().background());
+                        let (r, g, b, _) = color.to_tuple_rgba();
+                        Some(CellVertex {
+                            color: [r, g, b, 1.0],
+                            cell_pos,
+                            pad: [0.0; 2],
+                        })
+                    } else {
+                        None
                     }
-                    x += glyph.advance;
-                }
+                });
+            self.instances.cpu_buffer_mut().clear();
+            self.instances.cpu_buffer_mut().extend(cells);
+        }
+
+        {
+            profiling::scope!("Make text instances");
+
+            self.text_instances.cpu_buffer_mut().clear();
+
+            let start = self.scroll_offset;
+            let end = self.scroll_offset + screen.physical_rows as StableRowIndex;
+            let range = screen.stable_range(&(start..end));
+
+            self.ui.update(|ui| {
+                ui.cursor_pos = [
+                    term.cursor_pos().x as _,
+                    screen.phys_row(term.cursor_pos().y) as _,
+                ];
+                let full_height = screen.lines.as_slices().0.len() as f32;
+
+                ui.scrollbar_top = 1.0 - (range.start as f32 / full_height) * 2.0;
+                ui.scrollbar_height = -(range.len() as f32 / full_height) * 2.0;
             });
+
+            for (line_no, line) in screen.lines.as_slices().0[range].iter().enumerate() {
+                // if !line.changed_since(self.prev_term_seqno) {
+                //     continue;
+                // }
+                let mut x = 0.0;
+                let mut shaper = self
+                    .shape_ctx
+                    .builder(self.font)
+                    .size(self.font_size)
+                    .build();
+                let s = line.as_str();
+                shaper.add_str(&s);
+                let mut cells = line.cells();
+
+                shaper.shape_with(|cluster| {
+                    let (cluster_cells, new_cells) = cells.split_at(cluster.glyphs.len());
+                    cells = new_cells;
+                    // let s = &s[cluster.source.to_range()];
+                    for (glyph, cell) in cluster.glyphs.iter().zip(cluster_cells) {
+                        if let Some(info) = self.glyph_cache.get(&glyph.id) {
+                            let (r, g, b, _) = palette
+                                .resolve_fg(cell.attrs().foreground())
+                                .to_tuple_rgba();
+                            self.text_instances.cpu_buffer_mut().push(TextVertex {
+                                offset: [
+                                    x + glyph.x + info.glyph_position[0],
+                                    cell_size[1] * (line_no + 1) as f32
+                                        - (info.glyph_position[1] + glyph.y + self.font_descent),
+                                ],
+                                tex_offset: info.tex_position,
+                                tex_size: info.tex_size,
+                                color: [r, g, b],
+                                layer: info.layer as i32,
+                            });
+                        }
+                        x += glyph.advance;
+                    }
+                });
+            }
         }
 
         self.instances.write(device, queue);
@@ -565,11 +594,13 @@ impl CellContext {
 
         rpass.set_bind_group(0, &self.bind_group, &[]);
 
-        rpass.push_debug_group("Draw cell");
-        rpass.set_pipeline(&self.pipeline);
-        rpass.set_vertex_buffer(0, self.instances.gpu_buffer().slice(..));
-        rpass.draw(0..4, 0..self.instances.len() as _);
-        rpass.pop_debug_group();
+        if self.instances.len() != 0 {
+            rpass.push_debug_group("Draw cell");
+            rpass.set_pipeline(&self.pipeline);
+            rpass.set_vertex_buffer(0, self.instances.gpu_buffer().slice(..));
+            rpass.draw(0..4, 0..self.instances.len() as _);
+            rpass.pop_debug_group();
+        }
 
         rpass.push_debug_group("Draw text");
         rpass.set_pipeline(&self.text_pipeline);
@@ -589,6 +620,8 @@ impl CellContext {
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct CellVertex {
     color: [f32; 4],
+    cell_pos: [f32; 2],
+    pad: [f32; 2],
 }
 
 #[repr(C)]

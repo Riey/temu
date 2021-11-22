@@ -1,12 +1,16 @@
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use wezterm_term::TerminalConfiguration;
+use termwiz::color::RgbColor;
+use wezterm_term::{color::ColorPalette, TerminalConfiguration};
 
 #[derive(Clone, Debug)]
 pub struct TerminalConfig;
 
 impl TerminalConfiguration for TerminalConfig {
-    fn color_palette(&self) -> wezterm_term::color::ColorPalette {
-        wezterm_term::color::ColorPalette::default()
+    fn color_palette(&self) -> ColorPalette {
+        ColorPalette {
+            background: RgbColor::new_f32(0.1, 0.1, 0.1),
+            ..Default::default()
+        }
     }
 }
 

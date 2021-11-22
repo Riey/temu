@@ -29,8 +29,9 @@ let TEXTURE_WIDTH: f32 = 1024.0;
 
 struct CellInput {
     [[builtin(vertex_index)]] vertex_index: u32;
-    [[builtin(instance_index)]] cell_index: u32;
     [[location(0)]] color: vec4<f32>;
+    [[location(1)]] cell_pos: vec2<f32>;
+    [[location(2)]] pad: vec2<f32>;
 };
 
 struct CellOutput {
@@ -84,11 +85,8 @@ fn pixel_width_to_ndc(width: f32) -> f32 {
     return width;
 }
 
-fn calculate_cell_rect(cell_index: u32) -> Rect {
-    let row: u32 = cell_index / window_size.column;
-    let column: u32 = cell_index % window_size.column;
-
-    let begin = (vec2<f32>(f32(column), f32(row)) * window_size.cell_size);
+fn calculate_cell_rect(cell_pos: vec2<f32>) -> Rect {
+    let begin = (cell_pos * window_size.cell_size);
 
     return Rect(pixel_to_ndc(begin), pixel_size_to_ndc(window_size.cell_size));
 }
@@ -126,7 +124,7 @@ fn colorful_color(vertex_index: u32) -> vec4<f32> {
 fn cell_vs(
     model: CellInput,
 ) -> CellOutput {
-    let rect = calculate_cell_rect(model.cell_index);
+    let rect = calculate_cell_rect(model.cell_pos);
     // let color = colorful_color(model.vertex_index);
     let color = model.color;
     return CellOutput(vec4<f32>(get_rect_position(rect, model.vertex_index), 1.0, 1.0), color);
