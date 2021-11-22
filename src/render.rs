@@ -1,11 +1,15 @@
 mod atlas;
 mod cell;
+mod font_texture;
 mod viewport;
 
 use std::{io::Write, sync::Arc, time::Instant};
 
-use self::cell::CellContext;
 pub use self::viewport::Viewport;
+use self::{
+    cell::CellContext,
+    font_texture::{FontTexture, GlyphCacheInfo},
+};
 use crossbeam_channel::Receiver;
 use futures_executor::block_on;
 use temu_window::TemuEvent;
@@ -15,6 +19,8 @@ use wezterm_term::{KeyCode, Terminal, TerminalSize};
 const FONT: &[u8] = include_bytes!("../Hack Regular Nerd Font Complete Mono.ttf");
 
 const FONT_SIZE: f32 = 15.0;
+const TEXTURE_WIDTH: u32 = 1024;
+const TEXTURE_SIZE: usize = (TEXTURE_WIDTH * TEXTURE_WIDTH) as usize;
 
 #[allow(unused)]
 pub struct WgpuContext {
@@ -30,9 +36,17 @@ impl WgpuContext {
         viewport: Viewport,
         device: wgpu::Device,
         queue: wgpu::Queue,
+        font_texture: FontTexture,
         scale_factor: f32,
     ) -> Self {
-        let cell_ctx = CellContext::new(&device, &queue, &viewport, FONT_SIZE, scale_factor);
+        let cell_ctx = CellContext::new(
+            &device,
+            &queue,
+            &viewport,
+            font_texture,
+            FONT_SIZE,
+            scale_factor,
+        );
 
         Self {
             cell_ctx,
@@ -98,9 +112,18 @@ impl WgpuContext {
     }
 }
 
+#[profiling::function]
+pub fn generate_font_texture(scale_factor: f32) -> FontTexture {
+    FontTexture::new(
+        swash::FontRef::from_index(FONT, 0).unwrap(),
+        FONT_SIZE * scale_factor,
+    )
+}
+
 pub fn run(
     surface: wgpu::Surface,
     adapter: wgpu::Adapter,
+    font_texture: FontTexture,
     width: u32,
     height: u32,
     scale_factor: f32,
@@ -138,7 +161,13 @@ pub fn run(
     let mut current_size = (width, height);
 
     let viewport = Viewport::new(current_size.0, current_size.1, &adapter, &device, surface);
-    let mut ctx = WgpuContext::new(viewport, device, queue, scale_factor);
+    let mut ctx = WgpuContext::new(
+        viewport,
+        device,
+        queue,
+        font_texture,
+        scale_factor,
+    );
     // let mut fps = fps_counter::FPSCounter::new();
     // let mut fps_showtime = Instant::now();
     let always_redraw = false;

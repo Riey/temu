@@ -37,12 +37,14 @@ fn main() {
 
     log::info!("Init window");
     let window = init_native_window(event_tx.clone());
-    let (width, height) = window.size();
     let scale_factor = window.scale_factor();
+    let font_texture_handle = std::thread::spawn(move || render::generate_font_texture(scale_factor));
     let handle = window.get_raw_event_handle();
+    let (width, height) = window.size();
 
     std::thread::spawn(move || {
         let (output, _master, _shell, msg_rx, instance, adapters) = init_handle.join().unwrap();
+        let font_texture = font_texture_handle.join().unwrap();
         let surface = unsafe { instance.create_surface(&handle) };
 
         let adapter = adapters
@@ -53,6 +55,7 @@ fn main() {
         render::run(
             surface,
             adapter,
+            font_texture,
             width,
             height,
             scale_factor,

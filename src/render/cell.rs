@@ -3,20 +3,14 @@ use std::{mem, num::NonZeroU32};
 use ahash::AHashMap;
 use bytemuck::{Pod, Zeroable};
 // use rayon::prelude::*;
-use swash::{
-    scale::{image::Image, Render, ScaleContext, Source, StrikeWith},
-    shape::ShapeContext,
-    FontRef,
-};
+use swash::{shape::ShapeContext, FontRef};
 use termwiz::{color::ColorAttribute, surface::SequenceNo};
 use wgpu_container::{WgpuCell, WgpuVec};
 
-use crate::render::atlas::ArrayAllocator;
+use super::{FontTexture, GlyphCacheInfo, TEXTURE_WIDTH};
 use crate::render::Viewport;
 use wezterm_term::{StableRowIndex, Terminal};
 
-const TEXTURE_WIDTH: u32 = 1024;
-const TEXTURE_SIZE: usize = (TEXTURE_WIDTH * TEXTURE_WIDTH) as usize;
 const SCROLLBAR_FOCUSED: [f32; 4] = [0.2, 0.2, 0.2, 1.0];
 const SCROLLBAR_UNFOCUSED: [f32; 4] = [0.6, 0.6, 0.6, 1.0];
 
@@ -32,11 +26,11 @@ pub struct CellContext {
     font: FontRef<'static>,
     font_size: f32,
     font_descent: f32,
-    glyph_cache: AHashMap<u16, GlyphInfo>,
-    shape_ctx: ShapeContext,
+    glyph_cache: AHashMap<u16, GlyphCacheInfo>,
     prev_term_seqno: SequenceNo,
     scroll_offset: StableRowIndex,
     mouse_status: MouseStatus,
+    shape_ctx: ShapeContext,
 }
 
 impl CellContext {
@@ -44,6 +38,7 @@ impl CellContext {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         viewport: &Viewport,
+        font_texture: FontTexture,
         font_size: f32,
         scale_factor: f32,
     ) -> Self {
@@ -51,7 +46,7 @@ impl CellContext {
 
         let font_size = font_size * scale_factor;
 
-        let font = FontRef::from_index(super::FONT, 0).unwrap();
+        let font = font_texture.font;
 
         let metrics = font.metrics(&[]).scale(font_size);
         // monospace width
@@ -234,82 +229,10 @@ impl CellContext {
             },
         );
 
-        let mut allocator = ArrayAllocator::new(TEXTURE_WIDTH, TEXTURE_WIDTH);
-
-        let mut glyph_cache = AHashMap::new();
-        let shape_ctx = ShapeContext::new();
-        let mut scale_ctx = ScaleContext::new();
-        let mut image = Image::new();
-        let mut data = vec![0; TEXTURE_SIZE * 2];
-        let mut layer_count = 1;
-
-        let mut scaler = scale_ctx.builder(font).hint(true).size(font_size).build();
-
-        {
-            profiling::scope!("Create font texture");
-
-            font.charmap().enumerate(|_c, id| {
-                image.clear();
-                if Render::new(&[
-                    Source::ColorBitmap(StrikeWith::BestFit),
-                    Source::ColorOutline(0),
-                    Source::Bitmap(StrikeWith::BestFit),
-                    Source::Outline,
-                ])
-                .render_into(&mut scaler, id, &mut image)
-                {
-                    if image.placement.width == 0 || image.placement.height == 0 {
-                    } else {
-                        let alloc = allocator.alloc(image.placement.width, image.placement.height);
-                        if let Some(new_page) = alloc.layer.checked_sub(layer_count) {
-                            data.extend(
-                                std::iter::repeat(0).take(TEXTURE_SIZE * new_page as usize),
-                            );
-                            layer_count += new_page;
-                        }
-                        let page = &mut data[TEXTURE_SIZE * alloc.layer as usize..][..TEXTURE_SIZE];
-                        let left_top = (alloc.y * TEXTURE_WIDTH + alloc.x) as usize;
-
-                        for (row_index, row) in image
-                            .data
-                            .chunks_exact(image.placement.width as usize)
-                            .enumerate()
-                        {
-                            let begin = left_top + row_index * TEXTURE_WIDTH as usize;
-                            let end = begin + row.len();
-                            page[begin..end].copy_from_slice(row);
-                        }
-                        glyph_cache.insert(
-                            id,
-                            GlyphInfo {
-                                tex_position: [alloc.x as _, alloc.y as _],
-                                tex_size: [image.placement.width as _, image.placement.height as _],
-                                glyph_position: [
-                                    image.placement.left as _,
-                                    image.placement.top as _,
-                                ],
-                                layer: alloc.layer as _,
-                            },
-                        );
-                    }
-                }
-            });
-        }
-
-        // use std::io::Write;
-        // let mut out = std::fs::OpenOptions::new()
-        //     .write(true)
-        //     .create(true)
-        //     .open("foo.pgm")
-        //     .unwrap();
-        // write!(out, "P5\n{} {}\n255\n", TEXTURE_WIDTH, TEXTURE_WIDTH).unwrap();
-        // out.write_all(&data[..TEXTURE_SIZE]).unwrap();
-        // out.flush().unwrap();
-
         let texture_size = wgpu::Extent3d {
             width: TEXTURE_WIDTH,
             height: TEXTURE_WIDTH,
-            depth_or_array_layers: allocator.layer_count(),
+            depth_or_array_layers: font_texture.layer_count,
         };
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -325,7 +248,7 @@ impl CellContext {
 
         queue.write_texture(
             texture.as_image_copy(),
-            &data,
+            &font_texture.data,
             wgpu::ImageDataLayout {
                 bytes_per_row: NonZeroU32::new(TEXTURE_WIDTH),
                 rows_per_image: NonZeroU32::new(TEXTURE_WIDTH),
@@ -369,12 +292,12 @@ impl CellContext {
 
         Self {
             scroll_offset: 0,
-            shape_ctx,
             prev_term_seqno: 0,
             text_instances: WgpuVec::new(device, wgpu::BufferUsages::VERTEX),
             instances: WgpuVec::new(device, wgpu::BufferUsages::VERTEX),
             bind_group,
-            glyph_cache,
+            glyph_cache: font_texture.glyph_cache,
+            shape_ctx: ShapeContext::new(),
             window_size,
             ui,
             font,
@@ -684,13 +607,6 @@ impl Ui {
 }
 
 static_assertions::assert_eq_size!(Ui, [f32; 20]);
-
-struct GlyphInfo {
-    tex_position: [f32; 2],
-    glyph_position: [f32; 2],
-    tex_size: [f32; 2],
-    layer: i32,
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MouseTarget {
