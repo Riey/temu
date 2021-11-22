@@ -170,92 +170,85 @@ pub fn run(
     loop {
         profiling::scope!("Render loop");
 
-        if let Ok(msg) = msg_rx.try_recv() {
-            profiling::scope!("Process actions");
-            terminal.perform_actions(msg);
-            ctx.cell_ctx.scroll_to_bottom(&terminal);
-            ctx.cell_ctx
-                .set_terminal(&ctx.device, &ctx.queue, &terminal);
-            need_redraw = true;
-        }
-
-        match event_rx.try_recv() {
-            Ok(event) => match event {
-                TemuEvent::Char(c) => {
-                    profiling::scope!("Write char");
-                    terminal
-                        .key_down(KeyCode::Char(c), Default::default())
-                        .unwrap();
-                }
-                TemuEvent::Close => {
-                    break;
-                }
-                TemuEvent::Resize { width, height } => {
-                    if width == 0 || height == 0 {
-                        continue;
+        crossbeam_channel::select! {
+            recv(msg_rx) -> actions => {
+                profiling::scope!("Process actions");
+                terminal.perform_actions(actions.unwrap());
+                ctx.cell_ctx.scroll_to_bottom(&terminal);
+                ctx.cell_ctx
+                    .set_terminal(&ctx.device, &ctx.queue, &terminal);
+                need_redraw = true;
+            }
+            recv(event_rx) -> event => {
+                match event.unwrap() {
+                    TemuEvent::Char(c) => {
+                        profiling::scope!("Write char");
+                        terminal
+                            .key_down(KeyCode::Char(c), Default::default())
+                            .unwrap();
                     }
-                    if current_size != (width, height) {
-                        profiling::scope!("Resize");
-                        ctx.resize(width, height);
-                        // need_redraw = true;
-                        current_size = (width, height);
+                    TemuEvent::Close => {
+                        break;
                     }
-                }
-                TemuEvent::CursorMove { x, y } => {
-                    if pressed {
-                        if ctx.cell_ctx.drag(x, y) {
-                            need_redraw = true;
+                    TemuEvent::Resize { width, height } => {
+                        if width == 0 || height == 0 {
+                            continue;
                         }
-                        dragged = true;
-                    } else {
-                        if ctx.cell_ctx.hover(x, y) {
-                            need_redraw = true;
+                        if current_size != (width, height) {
+                            profiling::scope!("Resize");
+                            ctx.resize(width, height);
+                            // need_redraw = true;
+                            current_size = (width, height);
                         }
                     }
+                    TemuEvent::CursorMove { x, y } => {
+                        if pressed {
+                            if ctx.cell_ctx.drag(x, y) {
+                                need_redraw = true;
+                            }
+                            dragged = true;
+                        } else {
+                            if ctx.cell_ctx.hover(x, y) {
+                                need_redraw = true;
+                            }
+                        }
 
-                    cursor_pos = (x, y);
-                }
-                TemuEvent::Left(true) => {
-                    pressed = true;
-                }
-                TemuEvent::Left(false) => {
-                    if dragged {
-                        ctx.cell_ctx.drag_end();
-                    } else {
-                        ctx.cell_ctx.click(cursor_pos.0, cursor_pos.1);
+                        cursor_pos = (x, y);
                     }
-                    need_redraw = true;
-                    dragged = false;
-                    pressed = false;
+                    TemuEvent::Left(true) => {
+                        pressed = true;
+                    }
+                    TemuEvent::Left(false) => {
+                        if dragged {
+                            ctx.cell_ctx.drag_end();
+                        } else {
+                            ctx.cell_ctx.click(cursor_pos.0, cursor_pos.1);
+                        }
+                        need_redraw = true;
+                        dragged = false;
+                        pressed = false;
+                    }
+                    TemuEvent::Redraw => {
+                        need_redraw = true;
+                    }
+                    TemuEvent::ScrollUp => {
+                        ctx.cell_ctx.scroll(-1, &terminal);
+                        ctx.cell_ctx
+                            .set_terminal(&ctx.device, &ctx.queue, &terminal);
+                        need_redraw = true;
+                    }
+                    TemuEvent::ScrollDown => {
+                        ctx.cell_ctx.scroll(1, &terminal);
+                        ctx.cell_ctx
+                            .set_terminal(&ctx.device, &ctx.queue, &terminal);
+                        need_redraw = true;
+                    }
                 }
-                TemuEvent::Redraw => {
-                    need_redraw = true;
-                }
-                TemuEvent::ScrollUp => {
-                    ctx.cell_ctx.scroll(-1, &terminal);
-                    ctx.cell_ctx
-                        .set_terminal(&ctx.device, &ctx.queue, &terminal);
-                    need_redraw = true;
-                }
-                TemuEvent::ScrollDown => {
-                    ctx.cell_ctx.scroll(1, &terminal);
-                    ctx.cell_ctx
-                        .set_terminal(&ctx.device, &ctx.queue, &terminal);
-                    need_redraw = true;
-                }
-            },
-            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                break;
             }
-            Err(crossbeam_channel::TryRecvError::Empty) => {
-                if !need_redraw {
-                    profiling::scope!("Sleep");
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-            }
-        }
+        };
 
         if always_redraw || need_redraw {
+            profiling::scope!("Redraw");
             ctx.redraw();
             // let cur_fps = fps.tick();
             // let now = Instant::now();
