@@ -99,8 +99,8 @@ impl WgpuContext {
 }
 
 pub fn run(
-    instance: wgpu::Instance,
     surface: wgpu::Surface,
+    adapter: wgpu::Adapter,
     width: u32,
     height: u32,
     scale_factor: f32,
@@ -124,12 +124,6 @@ pub fn run(
     );
 
     let mut need_redraw = true;
-
-    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        compatible_surface: Some(&surface),
-        ..Default::default()
-    }))
-    .expect("Failed to find an appropriate adapter");
 
     let (device, queue) = block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {

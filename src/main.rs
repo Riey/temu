@@ -17,15 +17,18 @@ const DEFAULT_TEXT: [f32; 3] = [1.0, 1.0, 1.0];
 fn main() {
     profiling::register_thread!("Main Thread");
 
-    let pty_handle = std::thread::spawn(|| {
-        profiling::register_thread!("Pty Init Thread");
+    let init_handle = std::thread::spawn(|| {
+        profiling::register_thread!("Init Thread");
         let (master, shell) = crate::term::start_pty();
         let input = master.try_clone_reader().unwrap();
 
         let msg_rx = run_reader(input);
         let output = master.try_clone_writer().unwrap();
 
-        (output, master, shell, msg_rx)
+        let instance = wgpu::Instance::new(wgpu::Backends::all());
+        let adapters: Vec<_> = instance.enumerate_adapters(wgpu::Backends::all()).collect();
+
+        (output, master, shell, msg_rx, instance, adapters)
     });
 
     let (event_tx, event_rx) = crossbeam_channel::bounded(64);
@@ -36,15 +39,20 @@ fn main() {
     let window = init_native_window(event_tx.clone());
     let (width, height) = window.size();
     let scale_factor = window.scale_factor();
-
-    let instance = wgpu::Instance::new(wgpu::Backends::all());
-    let surface = unsafe { instance.create_surface(&window) };
+    let handle = window.get_raw_event_handle();
 
     std::thread::spawn(move || {
-        let (output, _master, _shell, msg_rx) = pty_handle.join().unwrap();
+        let (output, _master, _shell, msg_rx, instance, adapters) = init_handle.join().unwrap();
+        let surface = unsafe { instance.create_surface(&handle) };
+
+        let adapter = adapters
+            .into_iter()
+            .find(|a| a.is_surface_supported(&surface))
+            .expect("Failed to find an appropriate adapter");
+
         render::run(
-            instance,
             surface,
+            adapter,
             width,
             height,
             scale_factor,

@@ -6,7 +6,10 @@ pub use crossbeam_channel;
 
 use crossbeam_channel::Sender;
 
-pub trait TemuWindow: raw_window_handle::HasRawWindowHandle {
+pub trait TemuWindow {
+    type Handle: raw_window_handle::HasRawWindowHandle + Send;
+
+    fn get_raw_event_handle(&self) -> Self::Handle;
     fn init(event_tx: Sender<event::TemuEvent>) -> Self;
     fn size(&self) -> (u32, u32);
     fn scale_factor(&self) -> f32;

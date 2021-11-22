@@ -13,13 +13,27 @@ pub struct WinitWindow {
     event_tx: Sender<TemuEvent>,
 }
 
-unsafe impl HasRawWindowHandle for WinitWindow {
+pub struct WinitHandle {
+    handle: raw_window_handle::RawWindowHandle,
+}
+
+unsafe impl Send for WinitHandle {}
+
+unsafe impl HasRawWindowHandle for WinitHandle {
     fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
-        self.inner.raw_window_handle()
+        self.handle
     }
 }
 
 impl crate::TemuWindow for WinitWindow {
+    type Handle = WinitHandle;
+
+    fn get_raw_event_handle(&self) -> Self::Handle {
+        WinitHandle {
+            handle: self.inner.raw_window_handle(),
+        }
+    }
+
     fn init(event_tx: Sender<TemuEvent>) -> Self {
         let event_loop = EventLoop::new();
         let inner = WindowBuilder::new()
