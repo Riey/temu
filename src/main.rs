@@ -17,18 +17,23 @@ const DEFAULT_TEXT: [f32; 3] = [1.0, 1.0, 1.0];
 fn main() {
     profiling::register_thread!("Main Thread");
 
-    let init_handle = std::thread::spawn(|| {
-        profiling::register_thread!("Init Thread");
+    let adapter_handle = std::thread::spawn(|| {
+        profiling::register_thread!("Init Adapter Thread");
+        let instance = wgpu::Instance::new(wgpu::Backends::all());
+        let adapters: Vec<_> = instance.enumerate_adapters(wgpu::Backends::all()).collect();
+
+        (instance, adapters)
+    });
+
+    let pty_handle = std::thread::spawn(|| {
+        profiling::register_thread!("Init Pty Thread");
         let (master, shell) = crate::term::start_pty();
         let input = master.try_clone_reader().unwrap();
 
         let msg_rx = run_reader(input);
         let output = master.try_clone_writer().unwrap();
 
-        let instance = wgpu::Instance::new(wgpu::Backends::all());
-        let adapters: Vec<_> = instance.enumerate_adapters(wgpu::Backends::all()).collect();
-
-        (output, master, shell, msg_rx, instance, adapters)
+        (output, master, shell, msg_rx)
     });
 
     let (event_tx, event_rx) = crossbeam_channel::bounded(64);
@@ -38,19 +43,25 @@ fn main() {
     log::info!("Init window");
     let window = init_native_window(event_tx.clone());
     let scale_factor = window.scale_factor();
-    let font_texture_handle = std::thread::spawn(move || render::generate_font_texture(scale_factor));
+    let font_texture_handle = std::thread::spawn(move || {
+        profiling::register_thread!("Init FontTexture Thread");
+
+        render::generate_font_texture(scale_factor)
+    });
     let handle = window.get_raw_event_handle();
     let (width, height) = window.size();
 
     std::thread::spawn(move || {
-        let (output, _master, _shell, msg_rx, instance, adapters) = init_handle.join().unwrap();
-        let font_texture = font_texture_handle.join().unwrap();
+        let (instance, adapters) = adapter_handle.join().unwrap();
         let surface = unsafe { instance.create_surface(&handle) };
 
         let adapter = adapters
             .into_iter()
             .find(|a| a.is_surface_supported(&surface))
             .expect("Failed to find an appropriate adapter");
+
+        let (output, _master, _shell, msg_rx) = pty_handle.join().unwrap();
+        let font_texture = font_texture_handle.join().unwrap();
 
         render::run(
             surface,

@@ -161,13 +161,7 @@ pub fn run(
     let mut current_size = (width, height);
 
     let viewport = Viewport::new(current_size.0, current_size.1, &adapter, &device, surface);
-    let mut ctx = WgpuContext::new(
-        viewport,
-        device,
-        queue,
-        font_texture,
-        scale_factor,
-    );
+    let mut ctx = WgpuContext::new(viewport, device, queue, font_texture, scale_factor);
     // let mut fps = fps_counter::FPSCounter::new();
     // let mut fps_showtime = Instant::now();
     let always_redraw = false;
