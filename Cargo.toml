@@ -14,16 +14,16 @@ license = "GPL-3.0-or-later"
 temu-window = { path = "./temu-window" }
 wgpu-container = { path = "./wgpu-container" }
 
-bytemuck = { version = "1.7.2", features = ["derive"] }
-crossbeam-utils = "0.8.5"
+bytemuck = { version = "1.7.3", features = ["derive"] }
+crossbeam-utils = "0.8.6"
 env_logger = "0.9.0"
 fps_counter = "2.0.0"
-futures-executor = "0.3.17"
+futures-executor = "0.3.19"
 log = "0.4.14"
-wgpu = "0.11.0"
+wgpu = "0.12.0"
 
-portable-pty = "0.5.0"
-crossbeam-channel = "0.5.1"
+portable-pty = "0.7.0"
+crossbeam-channel = "0.5.2"
 rayon = "1.5.1"
 etagere = "0.2.6"
 ahash = "0.7.6"
@@ -32,7 +32,7 @@ euclid = "0.22.6"
 wezterm-term = { git = "https://github.com/wez/wezterm/" }
 termwiz = { git = "https://github.com/wez/wezterm/" }
 static_assertions = "1.1.0"
-profiling = "1.0.4"
+profiling = "1.0.5"
 # profiling = { version = "1.0.4", features = ["profile-with-superluminal"] }
 
 [features]

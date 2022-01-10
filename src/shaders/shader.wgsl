@@ -1,11 +1,9 @@
-[[block]]
 struct WindowSizeUniform {
     size: vec2<f32>;
     cell_size: vec2<f32>;
     column: u32;
 };
 
-[[block]]
 struct UiUniform {
     cursor_color: vec4<f32>;
     cursor_pos: vec2<f32>;

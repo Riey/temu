@@ -5,6 +5,7 @@ use bytemuck::{Pod, Zeroable};
 // use rayon::prelude::*;
 use swash::{shape::ShapeContext, FontRef};
 use termwiz::{color::ColorAttribute, surface::SequenceNo};
+use wgpu::SamplerBindingType;
 use wgpu_container::{WgpuCell, WgpuVec};
 
 use super::{FontTexture, GlyphCacheInfo, TEXTURE_WIDTH};
@@ -92,10 +93,7 @@ impl CellContext {
                 wgpu::BindGroupLayoutEntry {
                     binding: 6,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler {
-                        comparison: false,
-                        filtering: true,
-                    },
+                    ty: wgpu::BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
@@ -111,6 +109,7 @@ impl CellContext {
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("cell_pipeline"),
+            multiview: None,
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -145,6 +144,7 @@ impl CellContext {
 
         let ui_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("ui_pipeline"),
+            multiview: None,
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -171,6 +171,7 @@ impl CellContext {
 
         let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("text_pipeline"),
+            multiview: None,
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -212,6 +213,7 @@ impl CellContext {
                 size: [viewport.width() as f32, viewport.height() as f32],
                 cell_size,
                 column: crate::COLUMN,
+                pad: 0,
             },
         );
         let ui = WgpuCell::new(
@@ -574,6 +576,7 @@ struct WindowSize {
     size: [f32; 2],
     cell_size: [f32; 2],
     column: u32,
+    pad: u32,
 }
 
 #[repr(C)]
@@ -607,6 +610,7 @@ impl Ui {
 }
 
 static_assertions::assert_eq_size!(Ui, [f32; 20]);
+static_assertions::assert_eq_size!(WindowSize, [u8; 24]);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MouseTarget {
